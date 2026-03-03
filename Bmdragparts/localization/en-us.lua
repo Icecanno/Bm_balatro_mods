@@ -1,7 +1,12 @@
 return {
     misc={
         dictionary = {
-            ph_allow_drag_operation = "Allow Drag Operation",
+            b_operation_mode = "Operation Mode",
+            ml_ope_mod={
+                "Click",
+                "Mixed",
+                "Drag",
+            },
         },
     },
 }
