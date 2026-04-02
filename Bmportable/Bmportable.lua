@@ -4,7 +4,7 @@
 --- MOD_AUTHOR: [BaiMao Brookling]
 --- MOD_DESCRIPTION: More convenient function and information
 --- BADGE_COLOUR: 366999
---- VERSION: 1.0.1o
+--- VERSION: 1.0.1q
 ----------------------------------------------
 ------------MOD CODE -------------------------
 
@@ -18,11 +18,13 @@ Portable.update = {
 
 Portable.config_tab = function()
     return {n=G.UIT.ROOT, config = {align = "cm", padding = 0.05, colour = G.C.CLEAR}, nodes={
+        create_toggle({label = localize("k_misprint_display"), ref_table = Portable.config, ref_value = "misprint_display"}),
         create_toggle({label = localize("k_flip_sort"), ref_table = Portable.config, ref_value = "flip_sort"}),
         create_toggle({label = localize("k_predict_random"), ref_table = Portable.config, ref_value = "predict_random"}),
         create_toggle({label = localize("k_predict_random_bonus"), ref_table = Portable.config, ref_value = "predict_random_bonus"}),
         create_toggle({label = localize("k_flash_load"), ref_table = Portable.config, ref_value = "flash_load"}),
         create_toggle({label = localize("b_manual_save"), ref_table = Portable.config, ref_value = "manual_save"}),
+        create_toggle({label = localize("k_score_parse"), ref_table = Portable.config, ref_value = "score_parse"}),
         create_toggle({label = localize("k_score_display"), ref_table = Portable.config, ref_value = "score_display"}),
         create_toggle({label = localize("k_reduce_animation"), ref_table = Portable.config, ref_value = "reduce_animation"}),
     }}
@@ -32,10 +34,52 @@ function Portable.process_loc_text()
     G.localization.misc.dictionary = G.localization.misc.dictionary or {}
 end
 
+function shallow_copy(obj)
+    local res = {}
+    if type(obj) ~= "table" then
+        return obj
+    end
+    for k, v in pairs(obj) do
+        res[k] = v
+    end
+    return res
+end
+
+function copy_parse(obj, visited)
+    visited = visited or {}
+    if type(obj) ~= "table" then
+        return obj
+    end
+    if visited[obj] then
+        return visited[obj]
+    end
+    local copy = {}
+    visited[obj] = copy
+    for k, v in pairs(obj) do
+        copy[k] = copy_parse(v, visited)
+    end
+    return copy
+end
+
+function restore_parse(target, copy)
+    if not target or not copy then return end
+    for k, v in pairs(copy) do
+        if type(v) == "table" then
+            if type(target[k]) == "table" then
+                restore_parse(target[k], v)
+            else
+                target[k] = copy_parse(v)
+            end
+        else
+            target[k] = v
+        end
+    end
+end
+
 local Game_update_ref = Game.update
 function Game:update(dt)
     Game_update_ref(self, dt)
-    if Portable.config.score_display then update_preview(dt) end
+    if Portable.config.score_display or Portable.config.score_parse then update_preview(dt) end
     if Portable.update.dollar_UI then 
         local dollar_UI = G.HUD:get_UIE_by_ID('dollar_text_UI')
         dollar_UI.config.object:update()
@@ -54,22 +98,56 @@ function Game:update(dt)
         G.HUD:recalculate()
         Portable.update.hand_UI = false
     end
+    if can_parse() and has_order_changed() then
+        local parse = main_parse()
+        G.GAME.preview.chip_target = parse.global.chip_total
+        G.GAME.preview.dollar_target = parse.global.money
+    end
     G.GAME.misprint_rank = G.deck and G.deck.cards[1] and G.deck.cards[#G.deck.cards].base.value or nil
     G.GAME.misprint_suit = G.deck and G.deck.cards[1] and G.deck.cards[#G.deck.cards].base.suit or nil
 end
 
 local G_UIDEF_deck_preview_ref = G.UIDEF.deck_preview
 function G.UIDEF.deck_preview(args)
-    local _minh, _minw = 0.35, 0.5
-    local _colour = ((G.GAME.misprint_suit == 'Spades' or G.GAME.misprint_suit == 'Clubs') and G.C.WHITE or G.C.RED)
     local t = G_UIDEF_deck_preview_ref(args)
-    local suit_labels = t.nodes[1].nodes[1].nodes[1].nodes
-    local tt = {n=G.UIT.R, config={align = "cm", r = 0.1, padding = 0.04, minw = _minw, minh = 2*_minh+0.25}, nodes={
-        G.GAME.misprint_rank and {n=G.UIT.T, config={text = localize('b_next')..': ', colour = G.C.WHITE, scale = 0.25, shadow = true}} or nil,
-        G.GAME.misprint_suit and {n=G.UIT.T, config={text = localize(G.GAME.misprint_suit, 'suits_singular')..' '..localize(G.GAME.misprint_rank, 'ranks'), colour = _colour, scale = 0.25, shadow = true}} or nil,
-    }}
-    suit_labels[1] = tt
+    if Portable.config.misprint_display then
+        local _minh, _minw = 0.35, 0.5
+        local _colour = ((G.GAME.misprint_suit == 'Spades' or G.GAME.misprint_suit == 'Clubs') and G.C.WHITE or G.C.RED)
+        local suit_labels = t.nodes[1].nodes[1].nodes[1].nodes
+        local tt = {n=G.UIT.R, config={align = "cm", r = 0.1, padding = 0.04, minw = _minw, minh = 2*_minh+0.25}, nodes={
+            G.GAME.misprint_rank and {n=G.UIT.T, config={text = localize('b_next')..': ', colour = G.C.WHITE, scale = 0.25, shadow = true}} or nil,
+            G.GAME.misprint_suit and {n=G.UIT.T, config={text = localize(G.GAME.misprint_suit, 'suits_singular')..' '..localize(G.GAME.misprint_rank, 'ranks'), colour = _colour, scale = 0.25, shadow = true}} or nil,
+        }}
+        suit_labels[1] = tt
+    end
     return t
+end
+
+function record_history_hands(args)
+    G.GAME.history_hands = G.GAME.history_hands or {}
+    local current_hand = {}
+    current_hand.handname = args.text
+    current_hand.disp_handname = args.disp_handname
+    current_hand.level = G.GAME.hands[args.text].level
+    current_hand.chips = args.chips
+    current_hand.mult = args.mult
+    current_hand.chip_total = math.floor(args.chips*args.mult)
+    if Portable.config.score_display then
+        G.GAME.preview.chip_target = current_hand.chip_total 
+        G.GAME.preview.dollar_target = G.GAME.preview.dollar_tran
+    end
+    current_hand.cards = {}
+    for k, v in pairs(G.play.cards) do
+        local score = nil
+        for kk, vv in pairs(args.scoring_hand) do
+            if v == vv then score = true break end
+        end
+        local cardTable = v:save()
+        if score then cardTable.score = true end
+        table.insert(current_hand.cards, cardTable)
+    end
+    if G.GAME.chips + current_hand.chip_total - G.GAME.blind.chips >= 0 then current_hand.filter = true end
+    table.insert(G.GAME.history_hands, current_hand)
 end
 
 function G.UIDEF.current_stake()
@@ -243,7 +321,7 @@ function create_UIBox_history_hand_row(args)
                 {n=G.UIT.T, config={text = localize('k_level_prefix')..args.level, scale = 0.5, colour = G.C.UI.TEXT_DARK}}
             }},
             {n=G.UIT.C, config={align = "cm", minw = 3.2}, nodes={
-                {n=G.UIT.T, config={text = ' '..args.disp_handname, scale = 0.45, colour = G.C.UI.TEXT_LIGHT, shadow = true}}
+                {n=G.UIT.T, config={text = ' '..localize(args.disp_handname, 'poker_hands'), scale = 0.45, colour = G.C.UI.TEXT_LIGHT, shadow = true}}
             }}
         }},
         {n=G.UIT.C, config={align = "cm", padding = 0.05, colour = G.C.BLACK, r = 0.1}, nodes={
@@ -461,17 +539,6 @@ function Game:update(dt)
         if G.simulate_area then G.simulate_area:remove(); G.simulate_area = nil end
     end
     Game_update_ref(self, dt)
-end
-
-function shallow_copy(obj)
-    local res = {}
-    if type(obj) ~= "table" then
-        return obj
-    end
-    for k, v in pairs(obj) do
-        res[k] = v
-    end
-    return res
 end
 
 function simulate_create_card(_type, area, legendary, _rarity, skip_materialize, soulable, forced_key, key_append, ps)
@@ -1061,7 +1128,8 @@ function Game:start_run(args)
         dollar_tran = 0,
         dollar_proportion = 0,
         dollar = 0,
-        dollar_text = ''
+        dollar_text = '',
+        deck_text = '',
     }
     self.PHUD = UIBox{
         definition = {n=G.UIT.ROOT, config = {align = 'cm', minw = 0.001, minh = 0.001, padding = 0.03, r = 0.1, colour = copy_table(G.C.CLEAR)}, nodes={
@@ -1112,6 +1180,7 @@ function update_preview(dt)
             G.GAME.preview.chip_proportion = 1 - dt*(G.SETTINGS.GAMESPEED or 1)
         end
         G.GAME.preview.chip = math.floor(G.GAME.preview.chip_proportion*G.GAME.preview.chip_trans.begin + (1-G.GAME.preview.chip_proportion)*G.GAME.preview.chip_trans.final)
+        if G.GAME.preview.chip == math.huge and G.GAME.preview.chip_target ~= math.huge then G.GAME.preview.chip = G.GAME.preview.chip_target end
         G.GAME.preview.chip_proportion = math.max(G.GAME.preview.chip_proportion - dt*(G.SETTINGS.GAMESPEED or 1), 0)
     end
     if G.GAME and G.GAME.preview and G.GAME.preview.dollar ~= G.GAME.preview.dollar_target then
@@ -1121,6 +1190,7 @@ function update_preview(dt)
             G.GAME.preview.dollar_proportion = 1 - dt*(G.SETTINGS.GAMESPEED or 1)
         end
         G.GAME.preview.dollar = math.floor(G.GAME.preview.dollar_proportion*G.GAME.preview.dollar_trans.begin + (1-G.GAME.preview.dollar_proportion)*G.GAME.preview.dollar_trans.final)
+        if G.GAME.preview.dollar == math.huge and G.GAME.preview.dollar_target ~= math.huge then G.GAME.preview.dollar = G.GAME.preview.dollar_target end
         G.GAME.preview.dollar_proportion = math.max(G.GAME.preview.dollar_proportion - dt*(G.SETTINGS.GAMESPEED or 1), 0)
     end
 end
@@ -1130,8 +1200,6 @@ G.FUNCS.draw_from_play_to_discard = function(e)
     G_FUNCS_draw_from_play_to_discard_ref(e)
     G.E_MANAGER:add_event(Event({func = function()
         G.GAME.preview.chip_target = 0; G.GAME.preview.dollar_target = 0
-        if G.GAME.preview.chip == math.huge then G.GAME.preview.chip = 0 end
-        if G.GAME.preview.dollar == math.huge then G.GAME.preview.dollar = 0 end
     return true end}))
 end
 
@@ -1182,6 +1250,7 @@ function ease_discard(...)
     if Portable.config.reduce_animation then
         local args = {...}
         local mod = args[1] or 0
+        mod = math.max(-G.GAME.current_round.discards_left, mod)
         G.GAME.current_round.discards_left = G.GAME.current_round.discards_left + mod
         Portable.update.discard_UI = true
     else
@@ -1434,7 +1503,7 @@ function G.UIDEF.achievement_description(name)
     local progress_bars = {n=G.UIT.C, config={align = "cm", r = 0.1, maxh = 1.8, colour = G.C.L_BLACK, emboss = 0.05, progress_bar = {max = ac_tab.max, ref_table = ac_tab, ref_value = 'current', empty_col = G.C.L_BLACK, filled_col = achievement.completed and G.C.GREEN or G.C.FILTER}}, nodes={
         {n=G.UIT.C, config={align = "cm", padding = 0.05, r = 0.1, minw = 5}, nodes={
             {n=G.UIT.O, config={object = DynaText({string = {math.floor(0.01+100*ac_tab.current/ac_tab.max)..'%'}, font = G.LANGUAGES['en-us'].font, colours = {G.C.WHITE}, shadow = true, float = true, scale = 0.6})}},
-            {n=G.UIT.T, config={text = " ("..ac_tab.current..'/'..ac_tab.max..")", lang = G.LANGUAGES['en-us'], scale = scale_number(ac_tab.max, 0.6, 10000), colour = G.C.JOKER_GREY}}
+            {n=G.UIT.T, config={text = " ("..ac_tab.current..'/'..ac_tab.max..")", lang = G.LANGUAGES['en-us'], scale = scale_number(ac_tab.max, 0.6), colour = G.C.JOKER_GREY}}
         }}
     }}
     local unlock_col = {n=G.UIT.C, config={align = "cm", padding = 0.05, colour = G.C.L_BLACK, r = 0.1, maxh = 1.8}, nodes={
@@ -1572,55 +1641,1056 @@ function get_achievement_information(name)
     return achievement
 end
 
---[[
-    for k, v in pairs(G.P_CENTERS) do
-        if v.set == 'Back' and not v.omit then
-            G.PROFILES[G.SETTINGS.profile].deck_usage[k] = G.PROFILES[G.SETTINGS.profile].deck_usage[k] or {count = 1, order = v.order, wins = {}, losses = {}}
-            G.PROFILES[G.SETTINGS.profile].deck_usage[k].wins[G.P_STAKES["stake_gold"].stake_level] = (G.PROFILES[G.SETTINGS.profile].deck_usage[k].wins[G.P_STAKES["stake_gold"].stake_level] or 0) + 1
-            for i = 1, G.P_STAKES["stake_gold"].stake_level do
-                G.PROFILES[G.SETTINGS.profile].deck_usage[k].wins[i] = (G.PROFILES[G.SETTINGS.profile].deck_usage[k].wins[i] or 1)
+function can_parse()
+    if Portable.config.score_parse then
+        if G.STATE == G.STATES.SELECTING_HAND or G.STATE == G.STATES.DRAW_TO_HAND or G.STATE == G.STATES.PLAY_TAROT then
+            return true
+        end
+    end
+end
+
+function has_order_changed()
+    if not G.jokers or not G.hand then return end
+    G.GAME.parse_order = G.GAME.parse_order or {jokers = {}, hand = {}, highlighted = 0}
+    local order = G.GAME.parse_order
+    local changed = false
+    if (#order.jokers ~= #G.jokers.cards) or (#order.hand ~= #G.hand.cards) then changed = true end
+    if order.highlighted ~= #G.hand.highlighted then order.highlighted = #G.hand.highlighted; changed = true end
+    for k, v in ipairs(G.jokers.cards) do
+        if order.jokers[v.sort_id] ~= k then
+            changed = true
+            order.jokers[v.sort_id] = k
+        end
+    end
+    for k, v in ipairs(G.hand.cards) do
+        if order.hand[v.sort_id] ~= k then
+            changed = true
+            order.hand[v.sort_id] = k
+        end
+    end
+    return changed
+end
+
+function main_parse()
+    local parse = {}
+    global_parse(parse)
+    blind_parse(parse)
+    play_cards_parse(parse)
+    hand_cards_parse(parse)
+    poker_hands_parse(parse)
+    jokers_parse(parse)
+    planets_parse(parse)
+    evaluate_parse(parse)
+    return parse
+end
+
+function base_parse(card)
+    local base = {
+        sort_id = card.sort_id or 0,
+        suit = card.base.suit or "Spades",
+        is_face = card:is_face() or false,
+        nominal = card.base.nominal or 0,
+        id = card.base.id or 0,
+        debuff = card.debuff or false,
+        enhanced = card.ability.effect or "Base",
+        seal = card.seal or nil,
+        edition = card.edition and card.edition.type or "base",
+        perma_bonus = card.ability.perma_bonus or 0
+    }
+    return base
+end
+
+function joker_parse(card)
+    local joker = {
+        sort_id = card.sort_id or 0,
+        name = card.ability.name or "Joker",
+        rarity = card.config.center.rarity or 1,
+        debuff = card.debuff or false,
+        edition = card.edition and card.edition.type or "base",
+        card = card
+    }
+    return joker
+end
+
+function planet_parse(card)
+    local planet = {
+        sort_id = card.sort_id or 0,
+        name = card.ability.name or "Pluto",
+        debuff = card.debuff or false,
+        hand_type = card.ability.consumeable.hand_type or "High Card"
+    }
+    return planet
+end
+
+function level_parse(parse, amount)
+    amount = amount or 1
+    G.GAME.hands[parse.poker_hands.name].level = G.GAME.hands[parse.poker_hands.name].level + amount
+    G.GAME.hands[parse.poker_hands.name].chips = G.GAME.hands[parse.poker_hands.name].chips + G.GAME.hands[parse.poker_hands.name].l_chips*amount
+    G.GAME.hands[parse.poker_hands.name].mult = G.GAME.hands[parse.poker_hands.name].mult + G.GAME.hands[parse.poker_hands.name].l_mult*amount
+end
+
+function is_suit_parse(base, suit)
+    if base.enhanced == "Stone Card" then
+        return false
+    elseif base.enhanced == "Wild Card" then
+        return true
+    elseif next(find_joker("Smeared Joker")) and (base.suit == "Hearts" or base.suit == "Diamonds") == (suit == "Hearts" or suit == "Diamonds") then
+        return true
+    end
+    return base.suit == suit
+end
+
+function get_id_parse(base)
+    if base.enhanced == "Stone Card" and not base.vampired then
+        return -math.random(100, 1000000)
+    end
+    return base.id
+end
+
+--main subordinate parse
+function global_parse(parse)
+    parse.global = {
+        backup_pseudorandom = copy_parse(G.GAME.pseudorandom),
+        backup_hands = copy_parse(G.GAME.hands),
+        chip_total = 0,
+        chips = 0,
+        mult = 0,
+        money = 0,
+        dis_money = 0,
+        hands_left = G.GAME.current_round.hands_left or 1,
+        deck_size = #G.playing_cards or 0,
+        sort_id = G.sort_id or 0,
+        stone_tally = 0,
+        steel_tally = 0,
+        driver_tally = 0,
+    }
+    for _, v in ipairs(G.playing_cards) do
+        if v.config.center == G.P_CENTERS.m_stone then parse.global.stone_tally = parse.global.stone_tally + 1 end
+        if v.config.center == G.P_CENTERS.m_steel then parse.global.steel_tally = parse.global.steel_tally + 1 end
+        if v.config.center ~= G.P_CENTERS.c_base then parse.global.driver_tally = parse.global.driver_tally + 1 end
+    end
+end
+
+function blind_parse(parse)
+    parse.blind = {
+        name = G.GAME.blind.name or "Small Blind",
+        disabled = G.GAME.blind.disabled or false,
+    }
+end
+
+function play_cards_parse(parse)
+    parse.play_cards = {}
+    if G.hand and G.hand.highlighted and #G.hand.highlighted > 0 then
+        for k, v in ipairs(G.hand.highlighted) do
+            local base = base_parse(v)
+            base.order = v.T.x or k
+            table.insert(parse.play_cards, base)
+        end
+        table.sort(parse.play_cards, function(a, b) return a.order < b.order end)
+        for k, v in ipairs(parse.play_cards) do v.order = k end
+    end
+end
+
+function hand_cards_parse(parse)
+    parse.hand_cards = {}
+    if G.hand and G.hand.cards and #G.hand.cards > 0 then
+        for k, v in ipairs(G.hand.cards) do
+            if not v.highlighted then
+                local base = base_parse(v)
+                base.order = v.T.x or k
+                table.insert(parse.hand_cards, base)
             end
-        elseif v.set == 'Joker' and not v.no_collection and not v.omit then
-            G.PROFILES[G.SETTINGS.profile].joker_usage[k] = G.PROFILES[G.SETTINGS.profile].joker_usage[k] or {count = 1, order = v.order, wins = {}, losses = {}}
-            G.PROFILES[G.SETTINGS.profile].joker_usage[k].wins[G.P_STAKES["stake_gold"].stake_level] = (G.PROFILES[G.SETTINGS.profile].joker_usage[k].wins[G.P_STAKES["stake_gold"].stake_level] or 0) + 1
         end
-        if not v.demo and not v.wip and not v.omit then
-            v.alerted = true
-            v.discovered = true
-            v.unlocked = true
-        end
+        table.sort(parse.hand_cards, function(a, b) return a.order < b.order end)
+        for k, v in ipairs(parse.hand_cards) do v.order = k end
     end
-    for k, v in pairs(G.P_BLINDS) do
-        if not v.demo and not v.wip then
-            v.alerted = true
-            v.discovered = true
-            v.unlocked = true
+end
+
+function poker_hands_parse(parse)
+    parse.poker_hands = {}
+    parse.scoring_cards = {}
+    if G.hand and G.hand.highlighted and #G.hand.highlighted > 0 then
+        local text, _, poker_hands, scoring_hand = G.FUNCS.get_poker_hand_info(G.hand.highlighted)
+        parse.poker_hands.name = text
+        parse.poker_hands.subordinate = {}
+        for k, v in pairs(poker_hands) do
+            if next(v) then
+                parse.poker_hands.subordinate[k] = true
+            end
         end
-    end
-    for k, v in pairs(G.P_TAGS) do
-        if not v.demo and not v.wip then 
-            v.alerted = true
-            v.discovered = true
-            v.unlocked = true
+        local index = {}
+        for _, v in ipairs(parse.play_cards) do
+            index[v.sort_id] = v
         end
-    end
-    for k, v in ipairs(G.CHALLENGES) do
-        if v.id then
-            G.PROFILES[G.SETTINGS.profile].challenge_progress.completed[v.id] = true
-            G.PROFILES[G.SETTINGS.profile].challenges_unlocked = (G.PROFILES[G.SETTINGS.profile].challenges_unlocked or 0) + 1
+        for _, v in ipairs(scoring_hand) do
+            if index[v.sort_id] then
+                table.insert(parse.scoring_cards, index[v.sort_id])
+            end
         end
     end
-    if not G.ACHIEVEMENTS then fetch_achievements() end
-    for k, v in pairs(G.ACHIEVEMENTS) do
-        v.earned = true
-        G.SETTINGS.ACHIEVEMENTS_EARNED[k] = true
+end
+
+function jokers_parse(parse)
+    parse.jokers = {}
+    if G.jokers and G.jokers.cards and #G.jokers.cards > 0 then
+        for k, v in ipairs(G.jokers.cards) do
+            local joker = joker_parse(v)
+            joker.order = v.T.x or k
+            table.insert(parse.jokers, joker)
+        end
+        table.sort(parse.jokers, function(a, b) return a.order < b.order end)
+        for k, v in ipairs(parse.jokers) do v.order = k end
     end
-    set_profile_progress()
-    set_discover_tallies()
-    set_challenge_unlock()
-    G:save_progress()
-    G:save_settings()
-]]
+end
+
+function planets_parse(parse)
+    parse.planets = {}
+    if G.consumeables and G.consumeables.cards and #G.consumeables.cards > 0 then
+        for k, v in ipairs(G.consumeables.cards) do
+            if v.ability.set == "Planet" then
+                local planet = planet_parse(v)
+                planet.order = v.T.x or k
+                table.insert(parse.planets, planet)
+            end
+        end
+        table.sort(parse.planets, function(a, b) return a.order < b.order end)
+        for k, v in ipairs(parse.planets) do v.order = k end
+    end
+end
+
+--evaluate subordinate parse
+function eval_discard_parse(parse)
+    local discard_cards = {}
+    local to_keep = {}
+    local destroyed_cards = {}
+    for _, v in ipairs(parse.hand_cards) do
+        if v.discard then
+            v.discard = nil
+            table.insert(discard_cards, v)
+        else
+            table.insert(to_keep, v)
+        end
+    end
+    parse.hand_cards = to_keep
+    for k, v in ipairs(parse.hand_cards) do v.order = k end
+    table.sort(discard_cards, function(a, b) return a.order < b.order end)
+    for _, v in ipairs(discard_cards) do
+        local removed = false
+        for _, j in ipairs(parse.jokers) do
+            local is_destroyed = eval_joker_parse(j, parse, {discard = true, base = v, discarded = discard_cards})
+            if is_destroyed then removed = true end
+        end
+        if removed then
+            table.insert(destroyed_cards, v)
+            parse.global.deck_size = parse.global.deck_size - 1
+            if v.enhanced == "Stone Card" then
+                parse.global.stone_tally = parse.global.stone_tally - 1
+            elseif v.enhanced == "Steel Card" then
+                parse.global.steel_tally = parse.global.steel_tally - 1
+            end
+            if v.enhanced ~= "Base" then parse.global.driver_tally = parse.global.driver_tally - 1 end
+        end
+    end
+    if #destroyed_cards > 0 then
+        for _, v in ipairs(parse.jokers) do
+            eval_joker_parse(v, parse, {remove_playing_cards = true, removed = destroyed_cards})
+        end
+    end
+end
+
+function scoring_cards_parse(parse)
+    if next(find_joker("Splash")) then
+        for k, v in ipairs(parse.play_cards) do
+            parse.scoring_cards[k] = v
+        end
+    else
+        for _, v in ipairs(parse.play_cards) do
+            if v.enhanced == "Stone Card" then
+                local inside = false
+                for _, j in ipairs(parse.scoring_cards) do
+                    if j.sort_id == v.sort_id then
+                        inside = true
+                        break
+                    end
+                end
+                if not inside then table.insert(parse.scoring_cards, v) end
+            end
+        end
+    end
+    table.sort(parse.scoring_cards, function(a, b) return a.order < b.order end)
+end
+
+function eval_blind_parse(blind, parse, context)
+    if blind.disabled then return end
+    if context.press_play then
+        if blind.name == "The Hook" then
+            local any_selected = nil
+            local _cards = {}
+            for _, v in ipairs(parse.hand_cards) do
+                _cards[#_cards+1] = v
+            end
+            for i = 1, 2 do
+                if parse.hand_cards[i] then
+                    local selected_card, card_key = pseudorandom_element(_cards, pseudoseed("hook"))
+                    selected_card.discard = true
+                    table.remove(_cards, card_key)
+                    any_selected = true
+                end
+            end
+            if any_selected then
+                eval_discard_parse(parse)
+            end
+        elseif blind.name == "The Tooth" then
+            for _, v in ipairs(parse.play_cards) do
+                parse.global.money = parse.global.money - 1
+            end
+        end
+    elseif context.debuff_hand then
+        if blind.name == "The Ox" then
+            if parse.poker_hands.name == G.GAME.current_round.most_played_poker_hand then
+                blind.triggered = true
+                parse.global.money = parse.global.money - G.GAME.dollars
+            end
+        elseif blind.name == "The Mouth" then
+            if G.GAME.blind.only_hand and G.GAME.blind.only_hand ~= parse.poker_hands.name then
+                blind.triggered = true
+                return true
+            end
+        elseif blind.name == "The Arm" then
+            if G.GAME.hands[parse.poker_hands.name].level > 1 then
+                blind.triggered = true
+                level_parse(parse, -1)
+            end
+        elseif blind.name == "The Psychic" then
+            if #parse.play_cards < G.GAME.blind.debuff.h_size_ge then
+                blind.triggered = true
+                return true
+            end
+        elseif blind.name == "The Eye" then
+            if G.GAME.blind.hands[parse.poker_hands.name] then
+                blind.triggered = true
+                return true
+            end
+        end
+    elseif context.modify_hand then
+        if blind.name == "The Flint" then
+            blind.triggered = true
+            parse.global.chips = math.max(math.floor(parse.global.chips*0.5 + 0.5), 1)
+            parse.global.mult = math.max(math.floor(parse.global.mult*0.5 + 0.5), 0)
+        end
+    end
+end
+
+function eval_seal_parse(base, parse, context)
+    if base.debuff or not base.seal then return end
+    if context.repetition then
+        if base.seal == "Red" then
+            return 1
+        end
+    end
+end
+
+function eval_edition_parse(card, parse)
+    if card.debuff or not card.edition then return end
+    if card.edition == "foil" then
+        parse.global.chips = parse.global.chips + G.P_CENTERS.e_foil.config.extra
+    elseif card.edition == "holo" then
+        parse.global.mult = parse.global.mult + G.P_CENTERS.e_holo.config.extra
+    elseif card.edition == "polychrome" then
+        parse.global.mult = parse.global.mult*G.P_CENTERS.e_polychrome.config.extra
+    end
+end
+
+function base_bonus_parse(base, parse)
+    if base.debuff then return end
+    if base.enhanced ~= "Stone Card" then
+        parse.global.chips = parse.global.chips + base.nominal
+    end
+    if base.enhanced == "Bonus Card" then
+        parse.global.chips = parse.global.chips + G.P_CENTERS.m_bonus.config.bonus
+    elseif base.enhanced == "Stone Card" then
+        parse.global.chips = parse.global.chips + G.P_CENTERS.m_stone.config.bonus
+    end
+    parse.global.chips = parse.global.chips + base.perma_bonus
+end
+
+function base_mult_parse(base, parse)
+    if base.debuff then return end
+    if base.enhanced == "Mult Card" then
+        parse.global.mult = parse.global.mult + G.P_CENTERS.m_mult.config.mult
+    elseif base.enhanced == "Lucky Card" then
+        if pseudorandom("lucky_mult") < G.GAME.probabilities.normal/5 then
+            base.lucky_trigger = true
+            parse.global.mult = parse.global.mult + G.P_CENTERS.m_lucky.config.mult
+        end
+    end
+end
+
+function base_dollars_parse(base, parse)
+    if base.debuff then return end
+    if base.seal == "Gold" then
+        parse.global.money = parse.global.money + 3
+    end
+    if base.enhanced == "Lucky Card" then
+        if pseudorandom("lucky_money") < G.GAME.probabilities.normal/15 then
+            base.lucky_trigger = true
+            parse.global.money = parse.global.money + G.P_CENTERS.m_lucky.config.p_dollars
+        end
+    end
+end
+
+function base_x_mult_parse(base, parse)
+    if base.debuff then return end
+    if base.enhanced == "Glass Card" then
+        parse.global.mult = parse.global.mult*G.P_CENTERS.m_glass.config.Xmult
+    end
+end
+
+function base_h_x_mult_parse(base, parse)
+    if base.debuff then return end
+    if base.enhanced == "Steel Card" then
+        parse.global.mult = parse.global.mult*G.P_CENTERS.m_steel.config.h_x_mult
+    end
+end
+
+function eval_base_parse(base, parse, context)
+    if base.debuff then return end
+    if context.repetition then
+        return eval_seal_parse(base, parse, context)
+    elseif context.play then
+        base_bonus_parse(base, parse)
+        base_mult_parse(base, parse)
+        base_dollars_parse(base, parse)
+        base_x_mult_parse(base, parse)
+        eval_edition_parse(base, parse)
+    elseif context.hand then
+        base_h_x_mult_parse(base, parse)
+    end
+end
+
+function eval_joker_parse(joker, parse, context)
+    if joker.debuff then return end
+    if joker.name == "Blueprint" then
+        context.copy_loop = (context.copy_loop or 0) + 1
+        if context.copy_loop > #parse.jokers then return end
+        if joker.order < #parse.jokers then
+            eval_joker_parse(parse.jokers[joker.order + 1], parse, context)
+        end
+    elseif joker.name == "Brainstorm" then
+        context.copy_loop = (context.copy_loop or 0) + 1
+        if context.copy_loop > #parse.jokers then return end
+        if joker.order > 1 then
+            eval_joker_parse(parse.jokers[1], parse, context)
+        end
+    elseif context.discard then
+        if joker.name == "Ramen" then
+            if not context.copy_loop then
+                if (joker.x_mult or joker.card.ability.x_mult) - joker.card.ability.extra <= 1 then
+                    table.remove(parse.jokers, joker.order)
+                    for k, v in ipairs(parse.jokers) do v.order = k end
+                else
+                    joker.x_mult = (joker.x_mult or joker.card.ability.x_mult) - joker.card.ability.extra
+                end
+            end
+        elseif joker.name == "Yorick" then
+            if not context.copy_loop then
+                if (joker.yorick_discards or joker.card.ability.yorick_discards) <= 1 then
+                    joker.yorick_discards = joker.card.ability.extra.discards
+                    joker.x_mult = (joker.x_mult or joker.card.ability.x_mult) + joker.card.ability.extra.xmult
+                else
+                    joker.yorick_discards = (joker.yorick_discards or joker.card.ability.yorick_discards) - 1
+                end
+            end
+        elseif joker.name == "Trading Card" then
+            if G.GAME.current_round.discards_used <= 0 and #context.discarded == 1 and not context.copy_loop then
+                parse.global.money = parse.global.money + joker.card.ability.extra
+                parse.global.dis_money = parse.global.dis_money + joker.card.ability.extra
+                return true
+            end
+        elseif joker.name == "Castle" then
+            if not context.base.debuff and is_suit_parse(context.base, G.GAME.current_round.castle_card.suit) and not context.copy_loop then
+                joker.chips = (joker.chips or joker.card.ability.extra.chips) + joker.card.ability.extra.chip_mod
+            end
+        elseif joker.name == "Mail-In Rebate" then
+            if not context.base.debuff and get_id_parse(context.base) == G.GAME.current_round.mail_card.id then
+                parse.global.money = parse.global.money + joker.card.ability.extra
+                parse.global.dis_money = parse.global.dis_money + joker.card.ability.extra
+            end
+        elseif joker.name == "Hit the Road" then
+            if not context.base.debuff and get_id_parse(context.base) == 11 and not context.copy_loop then
+                joker.x_mult = (joker.x_mult or joker.card.ability.x_mult) + joker.card.ability.extra
+            end
+        elseif joker.name == "Green Joker" then
+            if context.base == context.discarded[#context.discarded] and not context.copy_loop then
+                joker.mult = math.max(0, (joker.mult or joker.card.ability.mult) - joker.card.ability.extra.discard_sub)
+            end
+        end
+    elseif context.remove_playing_cards then
+        if joker.name == "Caino" then
+            if not context.copy_loop then
+                local face_cards = 0
+                for _, v in ipairs(context.removed) do
+                    if v.is_face then face_cards = face_cards + 1 end
+                end
+                if face_cards > 0 then
+                    joker.caino_xmult = (joker.caino_xmult or joker.card.ability.caino_xmult) + joker.card.ability.extra*face_cards
+                end
+            end
+        elseif joker.name == "Glass Joker" then
+            if not context.copy_loop then
+                local glass_cards = 0
+                for _, v in ipairs(context.removed) do
+                    if v.enhanced == "Glass Card" then glass_cards = glass_cards + 1 end
+                end
+                if glass_cards > 0 then
+                    joker.x_mult = (joker.x_mult or joker.card.ability.x_mult) + joker.card.ability.extra*glass_cards
+                end
+            end
+        end
+    elseif context.before then
+        if joker.name == "Spare Trousers" then
+            if (parse.poker_hands.subordinate["Two Pair"] or parse.poker_hands.subordinate["Full House"]) and not context.copy_loop then
+                joker.mult = (joker.mult or joker.card.ability.mult) + joker.card.ability.extra
+            end
+        elseif joker.name == "Space Joker" then
+            if pseudorandom("space") < G.GAME.probabilities.normal/joker.card.ability.extra then
+                level_parse(parse)
+            end
+        elseif joker.name == "Square Joker" then
+            if #parse.play_cards == 4 and not context.copy_loop then
+                joker.chips = (joker.chips or joker.card.ability.extra.chips) + joker.card.ability.extra.chip_mod
+            end
+        elseif joker.name == "Runner" then
+            if parse.poker_hands.subordinate["Straight"] and not context.copy_loop then
+                joker.chips = (joker.chips or joker.card.ability.extra.chips) + joker.card.ability.extra.chip_mod
+            end
+        elseif joker.name == "Midas Mask" then
+            if not context.copy_loop then
+                for _, v in ipairs(parse.scoring_cards) do
+                    if v.is_face then
+                        v.enhanced = "Gold Card"
+                    end
+                end
+            end
+        elseif joker.name == "Vampire" then
+            if not context.copy_loop then
+                local enhanced = 0
+                for k, v in ipairs(parse.scoring_cards) do
+                    if v.enhanced ~= "Base" and not v.debuff and not v.vampired then
+                        enhanced = enhanced + 1
+                        v.vampired = true
+                        v.enhanced = "Base"
+                    end
+                end
+                if enhanced > 0 then
+                    joker.x_mult = (joker.x_mult or joker.card.ability.x_mult) + joker.card.ability.extra*enhanced
+                end
+            end
+        elseif joker.name == "To Do List" then
+            if parse.poker_hands.name == joker.card.ability.to_do_poker_hand then
+                parse.global.money = parse.global.money + joker.card.ability.extra.dollars
+            end
+        elseif joker.name == "DNA" then
+            if G.GAME.current_round.hands_played == 0 and #parse.play_cards == 1 then
+                local copied = copy_parse(parse.play_cards[1])
+                table.insert(parse.hand_cards, copied)
+                parse.global.sort_id = parse.global.sort_id + 1
+                copied.sort_id = parse.global.sort_id
+                copied.order = #parse.hand_cards
+                parse.global.deck_size = parse.global.deck_size + 1
+                for _, v in ipairs(parse.jokers) do
+                    eval_joker_parse(v, parse, {playing_card_added = true, cards = {copied}})
+                end
+            end
+        elseif joker.name == "Ride the Bus" then
+            if not context.copy_loop then
+                local faces = false
+                for _, v in ipairs(parse.scoring_cards) do
+                    if v.is_face then
+                        faces = true
+                        break
+                    end
+                end
+                if faces then
+                    joker.mult = 0
+                else
+                    joker.mult = (joker.mult or joker.card.ability.mult) + joker.card.ability.extra
+                end
+            end
+        elseif joker.name == "Obelisk" then
+            if not context.copy_loop then
+                local reset = true
+                local play_more_than = (G.GAME.hands[parse.poker_hands.name].played or 0)
+                for k, v in pairs(G.GAME.hands) do
+                    if k ~= parse.poker_hands.name and v.played >= play_more_than and v.visible then
+                        reset = false
+                    end
+                end
+                if reset then
+                    joker.x_mult = 1
+                else
+                    joker.x_mult = (joker.x_mult or joker.card.ability.x_mult) + joker.card.ability.extra
+                end
+            end
+        elseif joker.name == "Green Joker" then
+            if not context.copy_loop then
+                joker.mult = (joker.mult or joker.card.ability.mult) + joker.card.ability.extra.hand_add
+            end
+        end
+    elseif context.playing_card_added then
+        if joker.name == "Hologram" then
+            if context.cards and context.cards[1] and not context.copy_loop then
+                joker.x_mult = (joker.x_mult or joker.card.ability.x_mult) + joker.card.ability.extra*#context.cards
+            end
+        end
+    elseif context.repetition then
+        if context.play then
+            if joker.name == "Sock and Buskin" then
+                if context.base.is_face then
+                    return joker.card.ability.extra
+                end
+            elseif joker.name == "Hanging Chad" then
+                if context.base == parse.scoring_cards[1] then
+                    return joker.card.ability.extra
+                end
+            elseif joker.name == "Dusk" then
+                if parse.global.hands_left == 0 then
+                    return joker.card.ability.extra
+                end
+            elseif joker.name == "Seltzer" then
+                return 1
+            elseif joker.name == "Hack" then
+                if get_id_parse(context.base) == 2 or get_id_parse(context.base) == 3 or get_id_parse(context.base) == 4 or get_id_parse(context.base) == 5 then
+                    return joker.card.ability.extra
+                end
+            end
+        elseif context.hand then
+            if joker.name == "Mime" then
+                return joker.card.ability.extra
+            end
+        end
+    elseif context.individual then
+        if context.play then
+            if joker.name == "Hiker" then
+                context.base.perma_bonus = context.base.perma_bonus + joker.card.ability.extra
+            elseif joker.name == "Lucky Cat" then
+                if context.base.lucky_trigger and not context.copy_loop then
+                    joker.x_mult = (joker.x_mult or joker.card.ability.x_mult) + joker.card.ability.extra
+                end
+            elseif joker.name == "Wee Joker" then
+                if get_id_parse(context.base) == 2 and not context.copy_loop then
+                    joker.chips = (joker.chips or joker.card.ability.extra.chips) + joker.card.ability.extra.chip_mod
+                end
+            elseif joker.name == "Photograph" then
+                local first_face = nil
+                for _, v in ipairs(parse.scoring_cards) do
+                    if v.is_face then first_face = v break end
+                end
+                if context.base == first_face then
+                    parse.global.mult = parse.global.mult*joker.card.ability.extra
+                end
+            elseif joker.name == "The Idol" then
+                if get_id_parse(context.base) == G.GAME.current_round.idol_card.id and is_suit_parse(context.base, G.GAME.current_round.idol_card.suit) then
+                    parse.global.mult = parse.global.mult*joker.card.ability.extra
+                end
+            elseif joker.name == "Scary Face" then
+                if context.base.is_face then
+                    parse.global.chips = parse.global.chips + joker.card.ability.extra
+                end
+            elseif joker.name == "Smiley Face" then
+                if context.base.is_face then
+                    parse.global.mult = parse.global.mult + joker.card.ability.extra
+                end
+            elseif joker.name == "Golden Ticket" then
+                if context.base.enhanced == "Gold Card" then
+                    parse.global.money = parse.global.money + joker.card.ability.extra
+                end
+            elseif joker.name == "Scholar" then
+                if get_id_parse(context.base) == 14 then
+                    parse.global.chips = parse.global.chips + joker.card.ability.extra.chips
+                    parse.global.mult = parse.global.mult + joker.card.ability.extra.mult
+                end
+            elseif joker.name == "Walkie Talkie" then
+                if get_id_parse(context.base) == 10 or get_id_parse(context.base) == 4 then
+                    parse.global.chips = parse.global.chips + joker.card.ability.extra.chips
+                    parse.global.mult = parse.global.mult + joker.card.ability.extra.mult
+                end
+            elseif joker.name == "Business Card" then
+                if context.base.is_face and pseudorandom("business") < G.GAME.probabilities.normal/joker.card.ability.extra then
+                    parse.global.money = parse.global.money + 2
+                end
+            elseif joker.name == "Fibonacci" then
+                if get_id_parse(context.base) == 2 or get_id_parse(context.base) == 3 or get_id_parse(context.base) == 5 or get_id_parse(context.base) == 8 or get_id_parse(context.base) == 14 then
+                    parse.global.mult = parse.global.mult + joker.card.ability.extra
+                end
+            elseif joker.name == "Even Steven" then
+                if get_id_parse(context.base) <= 10 and get_id_parse(context.base) >= 0 and get_id_parse(context.base)%2 == 0 then
+                    parse.global.mult = parse.global.mult + joker.card.ability.extra
+                end
+            elseif joker.name == "Odd Todd" then
+                if (get_id_parse(context.base) <= 10 and get_id_parse(context.base) >= 0 and get_id_parse(context.base)%2 == 1) or get_id_parse(context.base) == 14 then
+                    parse.global.chips = parse.global.chips + joker.card.ability.extra
+                end
+            elseif joker.card.ability.effect == "Suit Mult" then
+                if is_suit_parse(context.base, joker.card.ability.extra.suit) then
+                    parse.global.mult = parse.global.mult + joker.card.ability.extra.s_mult
+                end
+            elseif joker.name == "Rough Gem" then
+                if is_suit_parse(context.base, "Diamonds") then
+                    parse.global.money = parse.global.money + joker.card.ability.extra
+                end
+            elseif joker.name == "Onyx Agate" then
+                if is_suit_parse(context.base, "Clubs") then
+                    parse.global.mult = parse.global.mult + joker.card.ability.extra
+                end
+            elseif joker.name == "Arrowhead" then
+                if is_suit_parse(context.base, "Spades") then
+                    parse.global.chips = parse.global.chips + joker.card.ability.extra
+                end
+            elseif joker.name == "Bloodstone" then
+                if is_suit_parse(context.base, "Hearts") and pseudorandom("bloodstone") < G.GAME.probabilities.normal/joker.card.ability.extra.odds then
+                    parse.global.mult = parse.global.mult*joker.card.ability.extra.Xmult
+                end
+            elseif joker.name == "Ancient Joker" then
+                if is_suit_parse(context.base, G.GAME.current_round.ancient_card.suit) then
+                    parse.global.mult = parse.global.mult*joker.card.ability.extra
+                end
+            elseif joker.name == "Triboulet" then
+                if get_id_parse(context.base) == 12 or get_id_parse(context.base) == 13 then
+                    parse.global.mult = parse.global.mult*joker.card.ability.extra
+                end
+            end
+        elseif context.hand then
+            if joker.name == "Shoot the Moon" then
+                if get_id_parse(context.base) == 12 then
+                    parse.global.mult = parse.global.mult + 13
+                end
+            elseif joker.name == "Baron" then
+                if get_id_parse(context.base) == 13 then
+                    parse.global.mult = parse.global.mult*joker.card.ability.extra
+                end
+            elseif joker.name == "Reserved Parking" then
+                if context.base.is_face and pseudorandom("parking") < G.GAME.probabilities.normal/joker.card.ability.extra.odds then
+                    parse.global.money = parse.global.money + joker.card.ability.extra.dollars
+                end
+            elseif joker.name == "Raised Fist" then
+                local temp_Mult, temp_ID, raised_card = 15, 15, nil
+                for _, v in ipairs(parse.hand_cards) do
+                    if temp_ID >= v.id and v.enhanced ~= "Stone Card" then
+                        temp_Mult = v.nominal
+                        temp_ID = v.id
+                        raised_card = v
+                    end
+                end
+                if raised_card == context.base then
+                    parse.global.mult = parse.global.mult + temp_Mult*2
+                end
+            end
+        end
+    elseif context.joker_main then
+        if joker.name == "Loyalty Card" then
+            local loyalty_remaining = (joker.card.ability.extra.every - 1 - (G.GAME.hands_played - joker.card.ability.hands_played_at_create))%(joker.card.ability.extra.every + 1)
+            if loyalty_remaining == joker.card.ability.extra.every then
+                parse.global.mult = parse.global.mult*joker.card.ability.extra.Xmult
+            end
+        elseif (joker.x_mult or joker.card.ability.x_mult) > 1 then
+            if joker.card.ability.type == "" or parse.poker_hands.subordinate[joker.card.ability.type] then
+                parse.global.mult = parse.global.mult*(joker.x_mult or joker.card.ability.x_mult)
+            end
+        elseif joker.card.ability.t_mult > 0 then
+            if parse.poker_hands.subordinate[joker.card.ability.type] then
+                parse.global.mult = parse.global.mult + joker.card.ability.t_mult
+            end
+        elseif joker.card.ability.t_chips > 0 then
+            if parse.poker_hands.subordinate[joker.card.ability.type] then
+                parse.global.chips = parse.global.chips + joker.card.ability.t_chips
+            end
+        elseif joker.name == "Half Joker" then
+            if #parse.play_cards <= joker.card.ability.extra.size then
+                parse.global.mult = parse.global.mult + joker.card.ability.extra.mult
+            end
+        elseif joker.name == "Abstract Joker" then
+            parse.global.mult = parse.global.mult + joker.card.ability.extra*#parse.jokers
+        elseif joker.name == "Acrobat" then
+            if parse.global.hands_left == 0 then
+                parse.global.mult = parse.global.mult*joker.card.ability.extra
+            end
+        elseif joker.name == "Mystic Summit" then
+            if G.GAME.current_round.discards_left == joker.card.ability.extra.d_remaining then
+                parse.global.mult = parse.global.mult + joker.card.ability.extra.mult
+            end
+        elseif joker.name == "Misprint" then
+            local temp_Mult = pseudorandom("misprint", joker.card.ability.extra.min, joker.card.ability.extra.max)
+            parse.global.mult = parse.global.mult + temp_Mult
+        elseif joker.name == "Banner" then
+            if G.GAME.current_round.discards_left > 0 then
+                parse.global.chips = parse.global.chips + joker.card.ability.extra*G.GAME.current_round.discards_left
+            end
+        elseif joker.name == "Stuntman" then
+            parse.global.chips = parse.global.chips + joker.card.ability.extra.chip_mod
+        elseif joker.name == "Matador" then
+            if parse.blind.triggered then
+                parse.global.money = parse.global.money + joker.card.ability.extra
+            end
+        elseif joker.name == "Supernova" then
+            parse.global.mult = parse.global.mult + G.GAME.hands[parse.poker_hands.name].played
+        elseif joker.name == "Ceremonial Dagger" then
+            if joker.card.ability.mult > 0 then
+                parse.global.mult = parse.global.mult + joker.card.ability.mult
+            end
+        elseif joker.name == "Flower Pot" then
+            local suits = {["Hearts"] = 0, ["Diamonds"] = 0, ["Spades"] = 0, ["Clubs"] = 0}
+            for _, v in ipairs(parse.scoring_cards) do
+                if v.enhanced ~= "Wild Card" then
+                    if is_suit_parse(v, "Hearts") and suits["Hearts"] == 0 then suits["Hearts"] = suits["Hearts"] + 1
+                    elseif is_suit_parse(v, "Diamonds") and suits["Diamonds"] == 0 then suits["Diamonds"] = suits["Diamonds"] + 1
+                    elseif is_suit_parse(v, "Spades") and suits["Spades"] == 0 then suits["Spades"] = suits["Spades"] + 1
+                    elseif is_suit_parse(v, "Clubs") and suits["Clubs"] == 0 then suits["Clubs"] = suits["Clubs"] + 1 end
+                end
+            end
+            for _, v in ipairs(parse.scoring_cards) do
+                if v.enhanced == "Wild Card" and not v.debuff then
+                    if is_suit_parse(v, "Hearts") and suits["Hearts"] == 0 then suits["Hearts"] = suits["Hearts"] + 1
+                    elseif is_suit_parse(v, "Diamonds") and suits["Diamonds"] == 0 then suits["Diamonds"] = suits["Diamonds"] + 1
+                    elseif is_suit_parse(v, "Spades") and suits["Spades"] == 0 then suits["Spades"] = suits["Spades"] + 1
+                    elseif is_suit_parse(v, "Clubs") and suits["Clubs"] == 0 then suits["Clubs"] = suits["Clubs"] + 1 end
+                end
+            end
+            if suits["Hearts"] > 0 and suits["Diamonds"] > 0 and suits["Spades"] > 0 and suits["Clubs"] > 0 then
+                parse.global.mult = parse.global.mult*joker.card.ability.extra
+            end
+        elseif joker.name == "Seeing Double" then
+            local suits = {["Hearts"] = 0, ["Diamonds"] = 0, ["Spades"] = 0, ["Clubs"] = 0}
+            for _, v in ipairs(parse.scoring_cards) do
+                if v.enhanced ~= "Wild Card" and not v.debuff then
+                    if is_suit_parse(v, "Hearts") and suits["Hearts"] == 0 then suits["Hearts"] = suits["Hearts"] + 1
+                    elseif is_suit_parse(v, "Diamonds") and suits["Diamonds"] == 0 then suits["Diamonds"] = suits["Diamonds"] + 1
+                    elseif is_suit_parse(v, "Spades") and suits["Spades"] == 0 then suits["Spades"] = suits["Spades"] + 1
+                    elseif is_suit_parse(v, "Clubs") and suits["Clubs"] == 0 then suits["Clubs"] = suits["Clubs"] + 1 end
+                end
+            end
+            for _, v in ipairs(parse.scoring_cards) do
+                if v.enhanced == "Wild Card" and not v.debuff then
+                    if is_suit_parse(v, "Hearts") and suits["Hearts"] == 0 then suits["Hearts"] = suits["Hearts"] + 1
+                    elseif is_suit_parse(v, "Diamonds") and suits["Diamonds"] == 0 then suits["Diamonds"] = suits["Diamonds"] + 1
+                    elseif is_suit_parse(v, "Spades") and suits["Spades"] == 0 then suits["Spades"] = suits["Spades"] + 1
+                    elseif is_suit_parse(v, "Clubs") and suits["Clubs"] == 0 then suits["Clubs"] = suits["Clubs"] + 1 end
+                end
+            end
+            if (suits["Hearts"] > 0 or suits["Diamonds"] > 0 or suits["Spades"] > 0) and suits["Clubs"] > 0 then
+                parse.global.mult = parse.global.mult*joker.card.ability.extra
+            end
+        elseif joker.name == "Wee Joker" then
+            if (joker.chips or joker.card.ability.extra.chips) > 0 then
+                parse.global.chips = parse.global.chips + (joker.chips or joker.card.ability.extra.chips)
+            end
+        elseif joker.name == "Castle" then
+            if (joker.chips or joker.card.ability.extra.chips) > 0 then
+                parse.global.chips = parse.global.chips + (joker.chips or joker.card.ability.extra.chips)
+            end
+        elseif joker.name == "Blue Joker" then
+            if #G.deck.cards > 0 then
+                parse.global.chips = parse.global.chips + joker.card.ability.extra*#G.deck.cards
+            end
+        elseif joker.name == "Erosion" then
+            if G.GAME.starting_deck_size - parse.global.deck_size > 0 then
+                parse.global.mult = parse.global.mult + joker.card.ability.extra*(G.GAME.starting_deck_size - parse.global.deck_size)
+            end
+        elseif joker.name == "Square Joker" then
+            if (joker.chips or joker.card.ability.extra.chips) > 0 then
+                parse.global.chips = parse.global.chips + (joker.chips or joker.card.ability.extra.chips)
+            end
+        elseif joker.name == "Runner" then
+            if (joker.chips or joker.card.ability.extra.chips) > 0 then
+                parse.global.chips = parse.global.chips + (joker.chips or joker.card.ability.extra.chips)
+            end
+        elseif joker.name == "Ice Cream" then
+            parse.global.chips = parse.global.chips + joker.card.ability.extra.chips
+        elseif joker.name == "Stone Joker" then
+            if parse.global.stone_tally > 0 then
+                parse.global.chips = parse.global.chips + joker.card.ability.extra*parse.global.stone_tally
+            end
+        elseif joker.name == "Steel Joker" then
+            if parse.global.steel_tally > 0 then
+                parse.global.mult = parse.global.mult*(1 + joker.card.ability.extra*parse.global.steel_tally)
+            end
+        elseif joker.name == "Bull" then
+            if G.GAME.dollars + parse.global.money > 0 then
+                parse.global.chips = parse.global.chips + joker.card.ability.extra*(G.GAME.dollars + parse.global.money)
+            end
+        elseif joker.name == "Driver's License" then
+            if parse.global.driver_tally >= 16 then
+                parse.global.mult = parse.global.mult*joker.card.ability.extra
+            end
+        elseif joker.name == "Blackboard" then
+            local black_suits = 0
+            for _, v in ipairs(parse.hand_cards) do
+                if is_suit_parse(v, "Clubs") or is_suit_parse(v, "Spades") then
+                    black_suits = black_suits + 1
+                end
+            end
+            if black_suits == #parse.hand_cards then
+                parse.global.mult = parse.global.mult*joker.card.ability.extra
+            end
+        elseif joker.name == "Swashbuckler" then
+            if joker.card.ability.mult > 0 then
+                parse.global.mult = parse.global.mult + joker.card.ability.mult
+            end
+        elseif joker.name == "Joker" then
+            parse.global.mult = parse.global.mult + joker.card.ability.mult
+        elseif joker.name == "Spare Trousers" then
+            if (joker.mult or joker.card.ability.mult) > 0 then
+                parse.global.mult = parse.global.mult + (joker.mult or joker.card.ability.mult)
+            end
+        elseif joker.name == "Ride the Bus" then
+            if (joker.mult or joker.card.ability.mult) > 0 then
+                parse.global.mult = parse.global.mult + (joker.mult or joker.card.ability.mult)
+            end
+        elseif joker.name == "Flash Card" then
+            if joker.card.ability.mult > 0 then
+                parse.global.mult = parse.global.mult + joker.card.ability.mult
+            end
+        elseif joker.name == "Popcorn" then
+            if joker.card.ability.mult > 0 then
+                parse.global.mult = parse.global.mult + joker.card.ability.mult
+            end
+        elseif joker.name == "Green Joker" then
+            if (joker.mult or joker.card.ability.mult) > 0 then
+                parse.global.mult = parse.global.mult + (joker.mult or joker.card.ability.mult)
+            end
+        elseif joker.name == "Fortune Teller" then
+            if G.GAME.consumeable_usage_total and G.GAME.consumeable_usage_total.tarot > 0 then
+                parse.global.mult = parse.global.mult + G.GAME.consumeable_usage_total.tarot
+            end
+        elseif joker.name == "Gros Michel" then
+            parse.global.mult = parse.global.mult + joker.card.ability.extra.mult
+        elseif joker.name == "Cavendish" then
+            parse.global.mult = parse.global.mult*joker.card.ability.extra.Xmult
+        elseif joker.name == "Red Card" then
+            if joker.card.ability.mult > 0 then
+                parse.global.mult = parse.global.mult + joker.card.ability.mult
+            end
+        elseif joker.name == "Card Sharp" then
+            if G.GAME.hands[parse.poker_hands.name].played_this_round > 1 then
+                parse.global.mult = parse.global.mult*joker.card.ability.extra.Xmult
+            end
+        elseif joker.name == "Bootstraps" then
+            if math.floor((G.GAME.dollars + parse.global.money)/joker.card.ability.extra.dollars) >= 1 then
+                parse.global.mult = parse.global.mult + joker.card.ability.extra.mult*math.floor((G.GAME.dollars + parse.global.money)/joker.card.ability.extra.dollars)
+            end
+        elseif joker.name == "Caino" then
+            if (joker.caino_xmult or joker.card.ability.caino_xmult) > 1 then
+                parse.global.mult = parse.global.mult*(joker.caino_xmult or joker.card.ability.caino_xmult)
+            end
+        end
+    elseif context.other_joker then
+        if joker.name == "Baseball Card" then
+            if context.other_joker.rarity == 2 then
+                parse.global.mult = parse.global.mult*joker.card.ability.extra
+            end
+        end
+    elseif context.debuffed_hand then
+        if joker.name == "Matador" then
+            parse.global.money = parse.global.money + joker.card.ability.extra
+        end
+    end
+end
+
+function eval_planet_parse(planet, parse, context)
+    if planet.debuff then return end
+    if context.planet_main then
+        if planet.hand_type then
+            if G.GAME.used_vouchers.v_observatory and planet.hand_type == parse.poker_hands.name then
+                parse.global.mult = parse.global.mult*G.P_CENTERS.v_observatory.config.extra
+            end
+        end
+    end
+end
+
+function evaluate_parse(parse)
+    if not G.hand or not G.hand.highlighted or not (#G.hand.highlighted > 0) then return end
+    parse.global.hands_left = parse.global.hands_left - 1
+    eval_blind_parse(parse.blind, parse, {press_play = true})
+    G.GAME.hands[parse.poker_hands.name].played = G.GAME.hands[parse.poker_hands.name].played + 1
+    G.GAME.hands[parse.poker_hands.name].played_this_round = G.GAME.hands[parse.poker_hands.name].played_this_round + 1
+    G.GAME.hands[parse.poker_hands.name].visible = true
+    scoring_cards_parse(parse)
+    local not_allow = eval_blind_parse(parse.blind, parse, {debuff_hand = true})
+    if not not_allow then
+        for _, v in ipairs(parse.jokers) do
+            eval_joker_parse(v, parse, {before = true})
+        end
+        parse.global.chips = G.GAME.hands[parse.poker_hands.name].chips
+        parse.global.mult = G.GAME.hands[parse.poker_hands.name].mult
+        eval_blind_parse(parse.blind, parse, {modify_hand = true})
+        for _, v in ipairs(parse.scoring_cards) do
+            if v.debuff then
+                parse.blind.triggered = true
+            else
+                local reps = 1
+                local base_reps = eval_base_parse(v, parse, {repetition = true})
+                if base_reps then reps = reps + base_reps end
+                for _, j in ipairs(parse.jokers) do
+                    local joker_reps = eval_joker_parse(j, parse, {repetition = true, play = true, base = v})
+                    if joker_reps then reps = reps + joker_reps end
+                end
+                for i = 1, reps do
+                    eval_base_parse(v, parse, {play = true})
+                    for _, j in ipairs(parse.jokers) do
+                        eval_joker_parse(j, parse, {individual = true, play = true, base = v})
+                    end
+                    v.lucky_trigger = nil
+                end
+            end
+        end
+        for _, v in ipairs(parse.hand_cards) do
+            if not v.debuff then
+                local reps = 1
+                local base_reps = eval_base_parse(v, parse, {repetition = true})
+                if base_reps then reps = reps + base_reps end
+                for _, j in ipairs(parse.jokers) do
+                    local joker_reps = eval_joker_parse(j, parse, {repetition = true, hand = true, base = v})
+                    if joker_reps then reps = reps + joker_reps end
+                end
+                for i = 1, reps do
+                    eval_base_parse(v, parse, {hand = true})
+                    for _, j in ipairs(parse.jokers) do
+                        eval_joker_parse(j, parse, {individual = true, hand = true, base = v})
+                    end
+                end
+            end
+        end
+        for _, v in ipairs(parse.jokers) do
+            if v.edition == "foil" or v.edition == "holo" then
+                eval_edition_parse(v, parse)
+            end
+            eval_joker_parse(v, parse, {joker_main = true})
+            for _, j in ipairs(parse.jokers) do
+                eval_joker_parse(j, parse, {other_joker = v})
+            end
+            if v.edition == "polychrome" then
+                eval_edition_parse(v, parse)
+            end
+        end
+        for _, v in ipairs(parse.planets) do
+            eval_planet_parse(v, parse, {planet_main = true})
+        end
+        if G.GAME.modifiers.chips_dollar_cap then
+            parse.global.chips = math.min(parse.global.chips, math.max(G.GAME.dollars + parse.global.dis_money, 0))
+        elseif G.GAME.selected_back.name == "Plasma Deck" then
+            local tot = parse.global.chips + parse.global.mult
+            parse.global.chips = math.floor(tot/2)
+            parse.global.mult = math.floor(tot/2)
+        end
+    else
+        for _, v in ipairs(parse.jokers) do
+            eval_joker_parse(v, parse, {debuffed_hand = true})
+        end
+    end
+    parse.global.chip_total = math.floor(parse.global.chips*parse.global.mult)
+    restore_parse(G.GAME.pseudorandom, parse.global.backup_pseudorandom)
+    restore_parse(G.GAME.hands, parse.global.backup_hands)
+end
 
 ----------------------------------------------
 ------------MOD CODE END----------------------
