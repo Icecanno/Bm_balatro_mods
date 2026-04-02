@@ -1,5 +1,5 @@
 [manifest]
-version = "1.0.1o"
+version = "1.0.1q"
 dump_lua = true
 priority = 0
 
@@ -9,28 +9,7 @@ target = "functions/state_events.lua"
 pattern = '''-- TARGET: effects after hand evaluation'''
 position = "after"
 payload = '''
-G.GAME.history_hands = G.GAME.history_hands or {}
-local current_hand = {}
-current_hand.handname = text
-current_hand.disp_handname = disp_text
-current_hand.level = G.GAME.hands[text].level
-current_hand.chips = hand_chips
-current_hand.mult = mult
-current_hand.chip_total = math.floor(hand_chips*mult)
-G.GAME.preview.chip_target = current_hand.chip_total
-G.GAME.preview.dollar_target = G.GAME.preview.dollar_tran
-current_hand.cards = {}
-for k, v in pairs(G.play.cards) do
-    local score = nil
-    for kk, vv in pairs(scoring_hand) do
-        if v == vv then score = true break end
-    end
-    local cardTable = v:save()
-    if score then cardTable.score = true end
-    table.insert(current_hand.cards, cardTable)
-end
-table.insert(G.GAME.history_hands, current_hand)
-if G.GAME.chips + current_hand.chip_total >= G.GAME.blind.chips then current_hand.filter = true end
+record_history_hands({text = text, disp_handname = non_loc_disp_text, chips = hand_chips, mult = mult, scoring_hand = scoring_hand})
 '''
 match_indent = true
 overwrite = false
