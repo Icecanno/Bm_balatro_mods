@@ -1756,7 +1756,6 @@ function global_parse(parse)
         chips = 0,
         mult = 0,
         money = 0,
-        dis_money = 0,
         hands_left = G.GAME.current_round.hands_left or 1,
         deck_size = #G.playing_cards or 0,
         sort_id = G.sort_id or 0,
@@ -2074,13 +2073,13 @@ function eval_joker_parse(joker, parse, context)
         context.copy_loop = (context.copy_loop or 0) + 1
         if context.copy_loop > #parse.jokers then return end
         if joker.order < #parse.jokers then
-            eval_joker_parse(parse.jokers[joker.order + 1], parse, context)
+            return eval_joker_parse(parse.jokers[joker.order + 1], parse, context)
         end
     elseif joker.name == "Brainstorm" then
         context.copy_loop = (context.copy_loop or 0) + 1
         if context.copy_loop > #parse.jokers then return end
         if joker.order > 1 then
-            eval_joker_parse(parse.jokers[1], parse, context)
+            return eval_joker_parse(parse.jokers[1], parse, context)
         end
     elseif context.discard then
         if joker.name == "Ramen" then
@@ -2104,7 +2103,6 @@ function eval_joker_parse(joker, parse, context)
         elseif joker.name == "Trading Card" then
             if G.GAME.current_round.discards_used <= 0 and #context.discarded == 1 and not context.copy_loop then
                 parse.global.money = parse.global.money + joker.card.ability.extra
-                parse.global.dis_money = parse.global.dis_money + joker.card.ability.extra
                 return true
             end
         elseif joker.name == "Castle" then
@@ -2114,7 +2112,6 @@ function eval_joker_parse(joker, parse, context)
         elseif joker.name == "Mail-In Rebate" then
             if not context.base.debuff and get_id_parse(context.base) == G.GAME.current_round.mail_card.id then
                 parse.global.money = parse.global.money + joker.card.ability.extra
-                parse.global.dis_money = parse.global.dis_money + joker.card.ability.extra
             end
         elseif joker.name == "Hit the Road" then
             if not context.base.debuff and get_id_parse(context.base) == 11 and not context.copy_loop then
@@ -2660,6 +2657,7 @@ function evaluate_parse(parse)
                 end
             end
         end
+        local dollar_cap = parse.global.money
         for _, v in ipairs(parse.jokers) do
             if v.edition == "foil" or v.edition == "holo" then
                 eval_edition_parse(v, parse)
@@ -2676,7 +2674,7 @@ function evaluate_parse(parse)
             eval_planet_parse(v, parse, {planet_main = true})
         end
         if G.GAME.modifiers.chips_dollar_cap then
-            parse.global.chips = math.min(parse.global.chips, math.max(G.GAME.dollars + parse.global.dis_money, 0))
+            pparse.global.chips = math.min(parse.global.chips, math.max(G.GAME.dollars + dollar_cap, 0))
         elseif G.GAME.selected_back.name == "Plasma Deck" then
             local tot = parse.global.chips + parse.global.mult
             parse.global.chips = math.floor(tot/2)
