@@ -2674,7 +2674,7 @@ function evaluate_parse(parse)
             eval_planet_parse(v, parse, {planet_main = true})
         end
         if G.GAME.modifiers.chips_dollar_cap then
-            pparse.global.chips = math.min(parse.global.chips, math.max(G.GAME.dollars + dollar_cap, 0))
+            parse.global.chips = math.min(parse.global.chips, math.max(G.GAME.dollars + dollar_cap, 0))
         elseif G.GAME.selected_back.name == "Plasma Deck" then
             local tot = parse.global.chips + parse.global.mult
             parse.global.chips = math.floor(tot/2)
