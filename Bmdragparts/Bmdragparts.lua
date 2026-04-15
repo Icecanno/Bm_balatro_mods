@@ -4,7 +4,7 @@
 --- MOD_AUTHOR: [BaiMao]
 --- MOD_DESCRIPTION: Provide drag card function, incompatible with Bmwallet
 --- BADGE_COLOUR: 2F2F4F
---- VERSION: 1.0.1c
+--- VERSION: 1.0.1d
 ----------------------------------------------
 ------------MOD CODE -------------------------
 
@@ -237,6 +237,16 @@ end
 G.FUNCS.change_operation_mode = function(args)
     G.SETTINGS.GRAPHICS.operation_mode = args.to_key
     G:save_settings()
+end
+
+function Controller:is_valid_touch_hover_lock_target(target)
+    return target and target ~= G.ROOM and not target.REMOVED and target.states and target.states.hover and target:is(Card)
+end
+
+function Controller:should_lock_touch_hover()
+    local target = self.hovering.target
+    if not self.HID.touch or not self:is_valid_touch_hover_lock_target(target) then return false end
+    return Vector_Dist(self.cursor_down.T, self.cursor_up.T) >= G.MIN_CLICK_DIST
 end
 
 ----------------------------------------------
