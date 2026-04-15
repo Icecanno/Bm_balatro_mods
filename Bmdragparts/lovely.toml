@@ -1,5 +1,5 @@
 [manifest]
-version = "1.0.1c"
+version = "1.0.1d"
 dump_lua = true
 priority = 0
 
@@ -108,11 +108,6 @@ target = "engine/controller.lua"
 pattern = '''self.cursor_down.handled = true'''
 position = "before"
 payload = '''
-        if self.hover_locked then
-            self.hover_locked.states.hover.is = false
-            self.hover_locked:stop_hover()
-            self.hover_locked = nil
-        end
         if self.cursor_down.target == G.ROOM then self.slide.handled = false end
 '''
 match_indent = false
@@ -161,20 +156,55 @@ overwrite = false
 [[patches]]
 [patches.pattern]
 target = "engine/controller.lua"
-pattern = '''self.dragging.target.states.drag.is = false'''
+pattern = '''self.cursor_position = {x=0,y=0} --NOT IN GAME UNITS'''
 position = "after"
 payload = '''
-            if self.HID.touch and self.cursor_up.time - self.cursor_down.time > 0.3 and Vector_Dist(self.cursor_down.T, self.cursor_up.T) < G.MIN_CLICK_DIST then
-                self.hover_locked = self.dragging.target
-                self.hover_locked.states.hover.is = true
-                self.hover_locked:set_offset(self.cursor_hover.T, 'Hover')
-                local _ID =  self.hover_locked.ID
-                G.E_MANAGER:add_event(Event({trigger = 'after', blockable = false, blocking = false, delay = G.MIN_HOVER_TIME, func = function()
-                    if self.hover_locked and _ID == self.hover_locked.ID then
-                        self.hover_locked:hover() 
-                    end
-                return true end}))
-            end
+self.hover_locked = false --Touch-only hover lock for cards after a long press release
+'''
+match_indent = false
+overwrite = false
+
+[[patches]]
+[patches.pattern]
+target = "engine/controller.lua"
+pattern = '''--Now, handle the Cursor release'''
+position = "before"
+payload = '''
+        if self:should_lock_touch_hover() then self.hover_locked = true end
+'''
+match_indent = false
+overwrite = false
+
+[[patches]]
+[patches.pattern]
+target = "engine/controller.lua"
+pattern = '''elseif (self.cursor_hover.target == nil or (self.HID.touch and not self.is_cursor_down)) and self.hovering.target then'''
+position = "before"
+payload = '''
+    elseif self.hover_locked then
+        if self.hovering.target then self.hovering.target.states.hover.is = false end
+'''
+match_indent = false
+overwrite = false
+
+[[patches]]
+[patches.pattern]
+target = "engine/controller.lua"
+pattern = '''if self.dragging.prev_target == self.hovering.target then self.hovering.target:stop_hover();self.hovering.target = nil end'''
+position = "at"
+payload = '''
+        if self.dragging.prev_target == self.hovering.target and not self.hover_locked then self.hovering.target:stop_hover();self.hovering.target = nil end
+'''
+match_indent = false
+overwrite = false
+
+[[patches]]
+[patches.pattern]
+target = "engine/controller.lua"
+pattern = '''local press_node =  (self.HID.touch and self.cursor_hover.target) or self.hovering.target or self.focused.target'''
+position = "after"
+payload = '''
+    if self.hover_locked then self.hover_locked = false end
 '''
 match_indent = false
 overwrite = false
