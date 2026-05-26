@@ -1,5 +1,6 @@
 return {
     misprint_display = false,
+    deck_order = false,
     flip_sort = false,
     predict_random = false,
     predict_random_bonus = false,
@@ -8,4 +9,5 @@ return {
     score_parse = false,
     score_display = false,
     reduce_animation = false,
+    zoom_out = false,
 }
