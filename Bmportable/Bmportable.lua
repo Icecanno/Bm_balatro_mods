@@ -4,7 +4,7 @@
 --- MOD_AUTHOR: [BaiMao Brookling]
 --- MOD_DESCRIPTION: More convenient function and information
 --- BADGE_COLOUR: 366999
---- VERSION: 1.0.1q
+--- VERSION: 1.0.1s
 ----------------------------------------------
 ------------MOD CODE -------------------------
 
@@ -16,9 +16,17 @@ Portable.update = {
     hand_UI = false
 }
 
+Portable.predict = {
+    temp_p = nil,
+    temp_b = nil,
+    temp_j = nil,
+    temp_v = nil,
+}
+
 Portable.config_tab = function()
     return {n=G.UIT.ROOT, config = {align = "cm", padding = 0.05, colour = G.C.CLEAR}, nodes={
         create_toggle({label = localize("k_misprint_display"), ref_table = Portable.config, ref_value = "misprint_display"}),
+        create_toggle({label = localize("k_deck_order"), ref_table = Portable.config, ref_value = "deck_order"}),
         create_toggle({label = localize("k_flip_sort"), ref_table = Portable.config, ref_value = "flip_sort"}),
         create_toggle({label = localize("k_predict_random"), ref_table = Portable.config, ref_value = "predict_random"}),
         create_toggle({label = localize("k_predict_random_bonus"), ref_table = Portable.config, ref_value = "predict_random_bonus"}),
@@ -27,22 +35,12 @@ Portable.config_tab = function()
         create_toggle({label = localize("k_score_parse"), ref_table = Portable.config, ref_value = "score_parse"}),
         create_toggle({label = localize("k_score_display"), ref_table = Portable.config, ref_value = "score_display"}),
         create_toggle({label = localize("k_reduce_animation"), ref_table = Portable.config, ref_value = "reduce_animation"}),
+        create_toggle({label = localize("k_zoom_out"), ref_table = Portable.config, ref_value = "zoom_out"}),
     }}
 end
 
 function Portable.process_loc_text()
     G.localization.misc.dictionary = G.localization.misc.dictionary or {}
-end
-
-function shallow_copy(obj)
-    local res = {}
-    if type(obj) ~= "table" then
-        return obj
-    end
-    for k, v in pairs(obj) do
-        res[k] = v
-    end
-    return res
 end
 
 function copy_parse(obj, visited)
@@ -62,7 +60,12 @@ function copy_parse(obj, visited)
 end
 
 function restore_parse(target, copy)
-    if not target or not copy then return end
+    if type(target) ~= "table" or type(copy) ~= "table" then return end
+    for k, _ in pairs(target) do
+        if copy[k] == nil then
+            target[k] = nil
+        end
+    end
     for k, v in pairs(copy) do
         if type(v) == "table" then
             if type(target[k]) == "table" then
@@ -78,6 +81,15 @@ end
 
 local Game_update_ref = Game.update
 function Game:update(dt)
+    if G.SETTINGS.paused or (G.play and #G.play.cards > 0) or (G.CONTROLLER.locked) or (G.GAME.STOP_USE and G.GAME.STOP_USE > 0) then
+        if G.simulate_area then
+            G.simulate_area:remove(); G.simulate_area = nil
+            restore_parse(G.GAME.pseudorandom, Portable.predict.temp_p)
+            restore_parse(G.GAME.bosses_used, Portable.predict.temp_b)
+            restore_parse(G.GAME.used_jokers, Portable.predict.temp_j)
+            restore_parse(G.GAME.used_vouchers, Portable.predict.temp_v)
+        end
+    end
     Game_update_ref(self, dt)
     if Portable.config.score_display or Portable.config.score_parse then update_preview(dt) end
     if Portable.update.dollar_UI then 
@@ -482,7 +494,13 @@ end
 local Card_stop_hover_ref = Card.stop_hover
 function Card:stop_hover()
     Card_stop_hover_ref(self)
-    if G.simulate_area then G.simulate_area:remove(); G.simulate_area = nil end
+    if G.simulate_area then
+        G.simulate_area:remove(); G.simulate_area = nil
+        restore_parse(G.GAME.pseudorandom, Portable.predict.temp_p)
+        restore_parse(G.GAME.bosses_used, Portable.predict.temp_b)
+        restore_parse(G.GAME.used_jokers, Portable.predict.temp_j)
+        restore_parse(G.GAME.used_vouchers, Portable.predict.temp_v)
+    end
 end
 
 local Tag_get_uibox_table_ref = Tag.get_uibox_table
@@ -500,7 +518,13 @@ function Tag:generate_UI(_size)
     local tag_sprite_stop_hover_ref = tag_sprite.stop_hover
     tag_sprite.stop_hover = function(_self)
         tag_sprite_stop_hover_ref(_self)
-        if G.simulate_area then G.simulate_area:remove(); G.simulate_area = nil end
+        if G.simulate_area then
+            G.simulate_area:remove(); G.simulate_area = nil
+            restore_parse(G.GAME.pseudorandom, Portable.predict.temp_p)
+            restore_parse(G.GAME.bosses_used, Portable.predict.temp_b)
+            restore_parse(G.GAME.used_jokers, Portable.predict.temp_j)
+            restore_parse(G.GAME.used_vouchers, Portable.predict.temp_v)
+        end
     end
     return tag_sprite_tab, tag_sprite
 end
@@ -516,7 +540,13 @@ end
 local Blind_stop_hover_ref = Blind.stop_hover
 function Blind:stop_hover()
     Blind_stop_hover_ref(self)
-    if G.simulate_area then G.simulate_area:remove(); G.simulate_area = nil end
+    if G.simulate_area then
+        G.simulate_area:remove(); G.simulate_area = nil
+        restore_parse(G.GAME.pseudorandom, Portable.predict.temp_p)
+        restore_parse(G.GAME.bosses_used, Portable.predict.temp_b)
+        restore_parse(G.GAME.used_jokers, Portable.predict.temp_j)
+        restore_parse(G.GAME.used_vouchers, Portable.predict.temp_v)
+    end
 end
 
 local UIElement_hover_ref = UIElement.hover
@@ -530,15 +560,13 @@ end
 local UIElement_stop_hover_ref = UIElement.stop_hover
 function UIElement:stop_hover()
     UIElement_stop_hover_ref(self)
-    if G.simulate_area then G.simulate_area:remove(); G.simulate_area = nil end
-end
-
-local Game_update_ref = Game.update
-function Game:update(dt)
-    if G.SETTINGS.paused or (G.play and #G.play.cards > 0) or (G.CONTROLLER.locked) or (G.GAME.STOP_USE and G.GAME.STOP_USE > 0) then
-        if G.simulate_area then G.simulate_area:remove(); G.simulate_area = nil end
+    if G.simulate_area then
+        G.simulate_area:remove(); G.simulate_area = nil
+        restore_parse(G.GAME.pseudorandom, Portable.predict.temp_p)
+        restore_parse(G.GAME.bosses_used, Portable.predict.temp_b)
+        restore_parse(G.GAME.used_jokers, Portable.predict.temp_j)
+        restore_parse(G.GAME.used_vouchers, Portable.predict.temp_v)
     end
-    Game_update_ref(self, dt)
 end
 
 function simulate_create_card(_type, area, legendary, _rarity, skip_materialize, soulable, forced_key, key_append, ps)
@@ -669,10 +697,10 @@ end
 
 function predict_random(card)
     if not Portable.config.predict_random then return end
-    local temp_p = shallow_copy(G.GAME.pseudorandom)
-    local temp_b = shallow_copy(G.GAME.bosses_used)
-    local temp_j = shallow_copy(G.GAME.used_jokers)
-    local temp_v = shallow_copy(G.GAME.used_vouchers)
+    Portable.predict.temp_p = copy_parse(G.GAME.pseudorandom)
+    Portable.predict.temp_b = copy_parse(G.GAME.bosses_used)
+    Portable.predict.temp_j = copy_parse(G.GAME.used_jokers)
+    Portable.predict.temp_v = copy_parse(G.GAME.used_vouchers)
     local vars = {}
     if G.jokers and card.ability then
         if card.ability.name == "8 Ball" and Portable.config.predict_random_bonus then
@@ -1101,10 +1129,6 @@ function predict_random(card)
             end
         end
     end
-    G.GAME.pseudorandom = temp_p
-    G.GAME.bosses_used = temp_b
-    G.GAME.used_jokers = temp_j
-    G.GAME.used_vouchers = temp_v
     return vars
 end
 
@@ -2688,6 +2712,120 @@ function evaluate_parse(parse)
     parse.global.chip_total = math.floor(parse.global.chips*parse.global.mult)
     restore_parse(G.GAME.pseudorandom, parse.global.backup_pseudorandom)
     restore_parse(G.GAME.hands, parse.global.backup_hands)
+end
+
+local G_UIDEF_deck_info_ref = G.UIDEF.deck_info
+function G.UIDEF.deck_info(_show_remaining)
+    if Portable.config.deck_order then
+        return create_UIBox_generic_options({contents ={create_tabs(
+            {tabs = _show_remaining and {
+                {
+                label = localize('b_remaining'),
+                chosen = true,
+                tab_definition_function = G.UIDEF.view_deck,
+                tab_definition_function_args = true,
+                },
+                {
+                    label = localize('b_full_deck'),
+                    tab_definition_function = G.UIDEF.view_deck
+                },
+                {
+                    label = localize('k_deck_order'),
+                    tab_definition_function = G.UIDEF.view_deck_order
+                },
+            } or {
+            {
+                label = localize('b_full_deck'),
+                chosen = true,
+                tab_definition_function = G.UIDEF.view_deck
+            },
+            {
+                label = localize('k_deck_order'),
+                tab_definition_function = G.UIDEF.view_deck_order
+            },
+            },
+            tab_h = 8,
+            snap_to_nav = true}
+        )}})
+    else
+        return create_UIBox_generic_options({contents ={create_tabs(
+            {tabs = _show_remaining and {
+                {
+                label = localize('b_remaining'),
+                chosen = true,
+                tab_definition_function = G.UIDEF.view_deck,
+                tab_definition_function_args = true,
+                },
+                {
+                    label = localize('b_full_deck'),
+                    tab_definition_function = G.UIDEF.view_deck
+                },
+            } or {
+            {
+                label = localize('b_full_deck'),
+                chosen = true,
+                tab_definition_function = G.UIDEF.view_deck
+            },
+            },
+            tab_h = 8,
+            snap_to_nav = true}
+        )}})
+    end
+end
+
+function G.UIDEF.view_deck_order()
+  local deck_tables = {}
+  local total = #G.deck.cards
+
+  local num_cols
+  if total > 30 then num_cols = 4
+  elseif total > 20 then num_cols = 3
+  elseif total > 10 then num_cols = 2
+  else num_cols = 1
+  end
+
+  local cards_per_col = math.ceil(total / num_cols)
+
+  for col = 1, num_cols do
+    local start_pos = (col - 1) * cards_per_col + 1
+    local end_pos = math.min(col * cards_per_col, total)
+    local col_count = end_pos - start_pos + 1
+
+    if col_count > 0 then
+      local view_deck = CardArea(
+        G.ROOM.T.x + 0.2*G.ROOM.T.w/2, G.ROOM.T.h,
+        6.5*G.CARD_W,
+        0.6*G.CARD_H,
+        {card_limit = col_count, type = 'title', view_deck = true, highlight_limit = 0, card_w = G.CARD_W*0.7, draw_layers = {'card'}}
+      )
+      table.insert(deck_tables,
+        {n=G.UIT.R, config={align = "cm", padding = 0}, nodes={
+          {n=G.UIT.O, config={object = view_deck}}
+        }}
+      )
+
+      for i = 1, col_count do
+        local deck_idx = total - (start_pos + i - 1) + 1
+        local original_card = G.deck.cards[deck_idx]
+        if original_card then
+          local copy = copy_card(original_card, nil, 0.7)
+          copy.T.x = view_deck.T.x + view_deck.T.w/2
+          copy.T.y = view_deck.T.y
+          copy:hard_set_T()
+          view_deck:emplace(copy)
+        end
+      end
+    end
+  end
+
+  local t =
+  {n=G.UIT.ROOT, config={align = "cm", colour = G.C.CLEAR}, nodes={
+    {n=G.UIT.R, config={align = "cm", padding = 0.05}, nodes={}},
+    {n=G.UIT.R, config={align = "cm"}, nodes={
+      {n=G.UIT.C, config={align = "cm", padding = 0.1, r = 0.1, colour = G.C.BLACK, emboss = 0.05}, nodes=deck_tables}
+    }}
+  }}
+  return t
 end
 
 ----------------------------------------------
