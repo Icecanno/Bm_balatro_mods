@@ -1,15 +1,16 @@
 [manifest]
-version = "1.0.1q"
+version = "1.0.1s"
 dump_lua = true
 priority = 0
 
 [[patches]]
 [patches.pattern]
 target = "functions/state_events.lua"
-pattern = '''-- TARGET: effects after hand evaluation'''
-position = "after"
+pattern = '''check_and_set_high_score('hand',  SMODS.calculate_round_score() )'''
+position = "before"
 payload = '''
 record_history_hands({text = text, disp_handname = non_loc_disp_text, chips = hand_chips, mult = mult, scoring_hand = scoring_hand})
+
 '''
 match_indent = true
 overwrite = false
@@ -103,6 +104,56 @@ payload = '''
             if v.facing == 'back' then v:flip() end
         end
     end
+'''
+match_indent = false
+overwrite = false
+
+[[patches]]
+[patches.pattern]
+target = "main.lua"
+pattern = '''if G.ROOM then'''
+position = "before"
+payload = '''
+    if Portable.config.zoom_out then
+        G.TILESCALE = G.TILESCALE * 0.9
+    end
+
+'''
+match_indent = false
+overwrite = false
+
+[[patches]]
+[patches.pattern]
+target = "main.lua"
+pattern = '''G.ROOM_ATTACH.T.h = G.TILE_H'''
+position = "after"
+payload = '''
+    if Portable.config.zoom_out then
+        G.ROOM.T.x = math.max(G.ROOM_PADDING_W,
+			(w / (G.TILESIZE * G.TILESCALE) - G.ROOM.T.w) / 2)
+		G.ROOM.T.y = math.max(G.ROOM_PADDING_H,
+			(h / (G.TILESIZE * G.TILESCALE) - G.ROOM.T.h) / 2)
+    else
+        if w/h < G.window_prev.orig_ratio then
+			G.ROOM.T.x = G.ROOM_PADDING_W
+			G.ROOM.T.y = (h/(G.TILESIZE*G.TILESCALE) - (G.ROOM.T.h+G.ROOM_PADDING_H))/2 + G.ROOM_PADDING_H/2
+		else
+			G.ROOM.T.y = G.ROOM_PADDING_H
+			G.ROOM.T.x = (w/(G.TILESIZE*G.TILESCALE) - (G.ROOM.T.w+G.ROOM_PADDING_W))/2 + G.ROOM_PADDING_W/2
+		end
+    end
+--[[
+'''
+match_indent = false
+overwrite = false
+
+[[patches]]
+[patches.pattern]
+target = "main.lua"
+pattern = '''G.ROOM_ORIG = {'''
+position = "before"
+payload = '''
+]]
 '''
 match_indent = false
 overwrite = false
