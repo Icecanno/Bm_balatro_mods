@@ -4,7 +4,7 @@
 --- MOD_AUTHOR: [BaiMao Brookling]
 --- MOD_DESCRIPTION: More convenient function and information
 --- BADGE_COLOUR: 366999
---- VERSION: 1.0.1s
+--- VERSION: 1.0.1w
 ----------------------------------------------
 ------------MOD CODE -------------------------
 
@@ -21,21 +21,83 @@ Portable.predict = {
     temp_b = nil,
     temp_j = nil,
     temp_v = nil,
+    active = false,
+    smods_hooked = false,
 }
+
+function Portable_create_hover_tooltip(args)
+    args = args or {}
+    local tooltip_content = {
+        set = "Other",
+        key = args.tooltip_key or "bmportable_misprint_display"
+    }
+
+    return {
+        n = args.top_level_node or G.UIT.C,
+        config = {align = "cm"},
+        nodes = {
+            {
+                n = G.UIT.R,
+                config = {
+                    align = "cm",
+                    hover = true,
+                    can_collide = true,
+                    r = args.round or 0.1,
+                    maxh = args.h or 0.5,
+                    maxw = args.w or 0.5,
+                    minh = args.h or 0.5,
+                    minw = args.w or 0.5,
+                    focus_args = {snap_to = true},
+                    detailed_tooltip = tooltip_content,
+                    func = args.func,
+                    colour = args.colour or HEX('0096C7'),
+                    padding = args.padding or 0.1,
+                },
+                nodes = {
+                    {
+                        n = G.UIT.T,
+                        config = {
+                            text = args.text or "i",
+                            colour = args.text_colour or G.C.WHITE,
+                            scale = args.scale or 0.3,
+                        }
+                    }
+                }
+            }
+        }
+    }
+end
+
+function Portable_create_config_row(toggle_args, tooltip_key)
+    return {
+        n = G.UIT.R,
+        config = {align = "cm"},
+        nodes = {
+            {
+                n = G.UIT.C,
+                config = {align = "cl", padding = 0.05},
+                nodes = {
+                    create_toggle(toggle_args)
+                }
+            },
+            Portable_create_hover_tooltip{tooltip_key = tooltip_key}
+        }
+    }
+end
 
 Portable.config_tab = function()
     return {n=G.UIT.ROOT, config = {align = "cm", padding = 0.05, colour = G.C.CLEAR}, nodes={
-        create_toggle({label = localize("k_misprint_display"), ref_table = Portable.config, ref_value = "misprint_display"}),
-        create_toggle({label = localize("k_deck_order"), ref_table = Portable.config, ref_value = "deck_order"}),
-        create_toggle({label = localize("k_flip_sort"), ref_table = Portable.config, ref_value = "flip_sort"}),
-        create_toggle({label = localize("k_predict_random"), ref_table = Portable.config, ref_value = "predict_random"}),
-        create_toggle({label = localize("k_predict_random_bonus"), ref_table = Portable.config, ref_value = "predict_random_bonus"}),
-        create_toggle({label = localize("k_flash_load"), ref_table = Portable.config, ref_value = "flash_load"}),
-        create_toggle({label = localize("b_manual_save"), ref_table = Portable.config, ref_value = "manual_save"}),
-        create_toggle({label = localize("k_score_parse"), ref_table = Portable.config, ref_value = "score_parse"}),
-        create_toggle({label = localize("k_score_display"), ref_table = Portable.config, ref_value = "score_display"}),
-        create_toggle({label = localize("k_reduce_animation"), ref_table = Portable.config, ref_value = "reduce_animation"}),
-        create_toggle({label = localize("k_zoom_out"), ref_table = Portable.config, ref_value = "zoom_out"}),
+        Portable_create_config_row({label = localize("k_misprint_display"), ref_table = Portable.config, ref_value = "misprint_display"}, "bmportable_misprint_display"),
+        Portable_create_config_row({label = localize("k_deck_order"), ref_table = Portable.config, ref_value = "deck_order"}, "bmportable_deck_order"),
+        Portable_create_config_row({label = localize("k_flip_sort"), ref_table = Portable.config, ref_value = "flip_sort"}, "bmportable_flip_sort"),
+        Portable_create_config_row({label = localize("k_predict_random"), ref_table = Portable.config, ref_value = "predict_random"}, "bmportable_predict_random"),
+        Portable_create_config_row({label = localize("k_predict_random_bonus"), ref_table = Portable.config, ref_value = "predict_random_bonus"}, "bmportable_predict_random_bonus"),
+        Portable_create_config_row({label = localize("k_flash_load"), ref_table = Portable.config, ref_value = "flash_load"}, "bmportable_flash_load"),
+        Portable_create_config_row({label = localize("b_manual_save"), ref_table = Portable.config, ref_value = "manual_save"}, "bmportable_manual_save"),
+        Portable_create_config_row({label = localize("k_score_parse"), ref_table = Portable.config, ref_value = "score_parse"}, "bmportable_score_parse"),
+        Portable_create_config_row({label = localize("k_score_display"), ref_table = Portable.config, ref_value = "score_display"}, "bmportable_score_display"),
+        Portable_create_config_row({label = localize("k_reduce_animation"), ref_table = Portable.config, ref_value = "reduce_animation"}, "bmportable_reduce_animation"),
+        Portable_create_config_row({label = localize("k_zoom_out"), ref_table = Portable.config, ref_value = "zoom_out"}, "bmportable_zoom_out"),
     }}
 end
 
@@ -79,20 +141,45 @@ function restore_parse(target, copy)
     end
 end
 
+local function is_portable_simulated_context(context)
+    return context and ((context.card and context.card.bmportable_simulated) or (context.other_card and context.other_card.bmportable_simulated))
+end
+
+local function clear_portable_prediction()
+    Portable.predict.active = false
+    if not G or not G.simulate_area then return end
+    G.simulate_area:remove(); G.simulate_area = nil
+    restore_parse(G.GAME.pseudorandom, Portable.predict.temp_p)
+    restore_parse(G.GAME.bosses_used, Portable.predict.temp_b)
+    restore_parse(G.GAME.used_jokers, Portable.predict.temp_j)
+    restore_parse(G.GAME.used_vouchers, Portable.predict.temp_v)
+end
+
+local function hook_smods_calculate_context()
+    if Portable.predict.smods_hooked or not SMODS or not SMODS.calculate_context then return end
+    local SMODS_calculate_context_ref = SMODS.calculate_context
+    SMODS.calculate_context = function(context, return_table, no_resolve)
+        if context and ((Portable.predict.active and context.setting_ability) or is_portable_simulated_context(context)) then
+            if return_table then return end
+            return {}
+        end
+        return SMODS_calculate_context_ref(context, return_table, no_resolve)
+    end
+    Portable.predict.smods_hooked = true
+end
+
 local Game_update_ref = Game.update
 function Game:update(dt)
     if G.SETTINGS.paused or (G.play and #G.play.cards > 0) or (G.CONTROLLER.locked) or (G.GAME.STOP_USE and G.GAME.STOP_USE > 0) then
-        if G.simulate_area then
-            G.simulate_area:remove(); G.simulate_area = nil
-            restore_parse(G.GAME.pseudorandom, Portable.predict.temp_p)
-            restore_parse(G.GAME.bosses_used, Portable.predict.temp_b)
-            restore_parse(G.GAME.used_jokers, Portable.predict.temp_j)
-            restore_parse(G.GAME.used_vouchers, Portable.predict.temp_v)
-        end
+        clear_portable_prediction()
     end
     Game_update_ref(self, dt)
     if Portable.config.score_display or Portable.config.score_parse then update_preview(dt) end
     if Portable.update.dollar_UI then 
+        if G.GAME.dollar_buffer and G.GAME.dollar_buffer ~= 0 then
+            G.GAME.dollars = G.GAME.dollars + G.GAME.dollar_buffer
+            G.GAME.dollar_buffer = 0
+        end
         local dollar_UI = G.HUD:get_UIE_by_ID('dollar_text_UI')
         dollar_UI.config.object:update()
         G.HUD:recalculate()
@@ -158,7 +245,9 @@ function record_history_hands(args)
         if score then cardTable.score = true end
         table.insert(current_hand.cards, cardTable)
     end
-    if G.GAME.chips + current_hand.chip_total - G.GAME.blind.chips >= 0 then current_hand.filter = true end
+    if G.GAME.chips + current_hand.chip_total - G.GAME.blind.chips >= 0 then
+        current_hand.filter = true
+    end
     table.insert(G.GAME.history_hands, current_hand)
 end
 
@@ -494,13 +583,7 @@ end
 local Card_stop_hover_ref = Card.stop_hover
 function Card:stop_hover()
     Card_stop_hover_ref(self)
-    if G.simulate_area then
-        G.simulate_area:remove(); G.simulate_area = nil
-        restore_parse(G.GAME.pseudorandom, Portable.predict.temp_p)
-        restore_parse(G.GAME.bosses_used, Portable.predict.temp_b)
-        restore_parse(G.GAME.used_jokers, Portable.predict.temp_j)
-        restore_parse(G.GAME.used_vouchers, Portable.predict.temp_v)
-    end
+    clear_portable_prediction()
 end
 
 local Tag_get_uibox_table_ref = Tag.get_uibox_table
@@ -518,13 +601,7 @@ function Tag:generate_UI(_size)
     local tag_sprite_stop_hover_ref = tag_sprite.stop_hover
     tag_sprite.stop_hover = function(_self)
         tag_sprite_stop_hover_ref(_self)
-        if G.simulate_area then
-            G.simulate_area:remove(); G.simulate_area = nil
-            restore_parse(G.GAME.pseudorandom, Portable.predict.temp_p)
-            restore_parse(G.GAME.bosses_used, Portable.predict.temp_b)
-            restore_parse(G.GAME.used_jokers, Portable.predict.temp_j)
-            restore_parse(G.GAME.used_vouchers, Portable.predict.temp_v)
-        end
+        clear_portable_prediction()
     end
     return tag_sprite_tab, tag_sprite
 end
@@ -540,13 +617,7 @@ end
 local Blind_stop_hover_ref = Blind.stop_hover
 function Blind:stop_hover()
     Blind_stop_hover_ref(self)
-    if G.simulate_area then
-        G.simulate_area:remove(); G.simulate_area = nil
-        restore_parse(G.GAME.pseudorandom, Portable.predict.temp_p)
-        restore_parse(G.GAME.bosses_used, Portable.predict.temp_b)
-        restore_parse(G.GAME.used_jokers, Portable.predict.temp_j)
-        restore_parse(G.GAME.used_vouchers, Portable.predict.temp_v)
-    end
+    clear_portable_prediction()
 end
 
 local UIElement_hover_ref = UIElement.hover
@@ -560,13 +631,7 @@ end
 local UIElement_stop_hover_ref = UIElement.stop_hover
 function UIElement:stop_hover()
     UIElement_stop_hover_ref(self)
-    if G.simulate_area then
-        G.simulate_area:remove(); G.simulate_area = nil
-        restore_parse(G.GAME.pseudorandom, Portable.predict.temp_p)
-        restore_parse(G.GAME.bosses_used, Portable.predict.temp_b)
-        restore_parse(G.GAME.used_jokers, Portable.predict.temp_j)
-        restore_parse(G.GAME.used_vouchers, Portable.predict.temp_v)
-    end
+    clear_portable_prediction()
 end
 
 function simulate_create_card(_type, area, legendary, _rarity, skip_materialize, soulable, forced_key, key_append, ps)
@@ -605,6 +670,7 @@ function simulate_create_card(_type, area, legendary, _rarity, skip_materialize,
     end
     local front = ((_type == 'Base' or _type == 'Enhanced') and pseudorandom_element(G.P_CARDS, pseudoseed('front'..(key_append or '')..G.GAME.round_resets.ante))) or nil
     local card = Card(G.simulate_area.T.x + G.simulate_area.T.w/2, G.simulate_area.T.y, G.CARD_W/2, G.CARD_H/2, front, center)
+    card.bmportable_simulated = true
     if card.ability.consumeable and not skip_materialize then card:start_materialize() end
     if _type == 'Joker' then
         if G.GAME.modifiers.all_eternal then
@@ -631,10 +697,11 @@ end
 function simulate_copy_card(other, greyed, card_scale, playing_card, strip_edition)
     G.simulate_area = G.simulate_area or CardArea(-0.83, 5, 2.75*G.CARD_W, 0.5*G.CARD_H, {card_limit = 5, type = 'consumeable', highlight_limit = 0})
     local new_card = Card(G.simulate_area.T.x+G.simulate_area.T.w/2, G.simulate_area.T.y, G.CARD_W*0.5, G.CARD_H*0.5, G.P_CARDS.empty, G.P_CENTERS.c_base)
+    new_card.bmportable_simulated = true
     remove_all(new_card.children)
     new_card.children = {}
     new_card.children.shadow = Moveable(0, 0, 0, 0)
-    new_card:set_ability(other.config.center)
+    new_card:set_ability(other.config.center, true)
     new_card.ability.type = other.ability.type
     new_card:set_base(other.config.card)
     for k, v in pairs(other.ability) do
@@ -661,6 +728,7 @@ function simulate_create_playing_card(card_init, area, skip_materialize, silent,
     if card_init.empty then card_init.front = G.P_CARDS.empty end
     card_init.center = card_init.center or G.P_CENTERS.c_base
     local card = Card(G.simulate_area.T.x+G.simulate_area.T.w/2, G.simulate_area.T.y, G.CARD_W/2, G.CARD_H/2, card_init.front, card_init.center)
+    card.bmportable_simulated = true
     card.debuff = card_init.debuff
     if not skip_materialize then card:start_materialize(colours, silent) end
     G.simulate_area:emplace(card)
@@ -672,6 +740,7 @@ function simulate_create_blind(key)
     local center = G.P_BLINDS[key]
     local temp_blind = AnimatedSprite(G.simulate_area.T.x+G.simulate_area.T.w/2, G.simulate_area.T.y, G.CARD_W/2, G.CARD_W/2, G.ANIMATION_ATLAS[center.atlas or 'blind_chips'], center.pos)
     local card = Card(G.simulate_area.T.x+G.simulate_area.T.w/2, G.simulate_area.T.y, G.CARD_W/2, G.CARD_W/2, G.P_CARDS.empty, G.P_CENTERS.c_base)
+    card.bmportable_simulated = true
     card.children.center = temp_blind
     card.config.blind = center
     temp_blind:set_role({major = card, role_type = 'Glued', draw_major = card})
@@ -697,6 +766,8 @@ end
 
 function predict_random(card)
     if not Portable.config.predict_random then return end
+    hook_smods_calculate_context()
+    Portable.predict.active = true
     Portable.predict.temp_p = copy_parse(G.GAME.pseudorandom)
     Portable.predict.temp_b = copy_parse(G.GAME.bosses_used)
     Portable.predict.temp_j = copy_parse(G.GAME.used_jokers)
@@ -1054,6 +1125,7 @@ function predict_random(card)
             G.simulate_area = G.simulate_area or CardArea(-0.83, 5, 2.75*G.CARD_W, 0.5*G.CARD_H, {card_limit = 5, type = 'consumeable', highlight_limit = 0})
             local voucher_key = get_next_voucher_key(true)
             local _card = Card(G.simulate_area.T.x+G.simulate_area.T.w/2, G.simulate_area.T.y, G.CARD_W/2, G.CARD_H/2, G.P_CARDS.empty, G.P_CENTERS[voucher_key])
+            _card.bmportable_simulated = true
             _card:start_materialize()
             G.simulate_area:emplace(_card)
         end
@@ -1129,6 +1201,7 @@ function predict_random(card)
             end
         end
     end
+    Portable.predict.active = false
     return vars
 end
 
@@ -1177,7 +1250,7 @@ G.FUNCS.preview_chip_UI_set = function(e)
         local new_preview_chip_text = number_format(G.GAME.preview.chip)
         if G.GAME.preview.chip_text ~= new_preview_chip_text then
             --e.config.scale = math.min(0.8, scale_number(G.GAME.chips, 1.2))
-            e.config.colour = (G.GAME.chips + G.GAME.preview.chip_target >= G.GAME.blind.chips) and G.C.FILTER or G.C.WHITE
+            e.config.colour = (G.GAME.chips + G.GAME.preview.chip_target >= G.GAME.blind.chips) and G.C.FILTER or G.GAME.current_round.hands_left <= 0 and G.C.RED or G.C.WHITE
             G.GAME.preview.chip_text = new_preview_chip_text
         end
     end
@@ -1231,7 +1304,9 @@ local ease_dollars_ref = ease_dollars
 function ease_dollars(mod, instant)
     G.GAME.preview.dollar_tran = G.GAME.preview.dollar_tran + mod
     if Portable.config.reduce_animation then
-        G.GAME.dollars = G.GAME.dollars + (mod or 0)
+        if not G.GAME.dollar_buffer or G.GAME.dollar_buffer == 0 then
+            G.GAME.dollars = G.GAME.dollars + (mod or 0)
+        end
         Portable.update.dollar_UI = true
     else
         ease_dollars_ref(mod, instant)
@@ -1304,6 +1379,7 @@ function level_up_hand(...)
             G.GAME.hands[hand].level = math.max(0, G.GAME.hands[hand].level + amount)
             G.GAME.hands[hand].mult = math.max(G.GAME.hands[hand].s_mult + G.GAME.hands[hand].l_mult*(G.GAME.hands[hand].level - 1), 1)
             G.GAME.hands[hand].chips = math.max(G.GAME.hands[hand].s_chips + G.GAME.hands[hand].l_chips*(G.GAME.hands[hand].level - 1), 0)
+            update_hand_text(nil, {level=G.GAME.hands[hand].level})
         end
     else
         level_up_hand_ref(...)
@@ -2492,10 +2568,10 @@ function eval_joker_parse(joker, parse, context)
             end
             for _, v in ipairs(parse.scoring_cards) do
                 if v.enhanced == "Wild Card" and not v.debuff then
-                    if is_suit_parse(v, "Hearts") and suits["Hearts"] == 0 then suits["Hearts"] = suits["Hearts"] + 1
+                    if is_suit_parse(v, "Clubs") and suits["Clubs"] == 0 then suits["Clubs"] = suits["Clubs"] + 1
                     elseif is_suit_parse(v, "Diamonds") and suits["Diamonds"] == 0 then suits["Diamonds"] = suits["Diamonds"] + 1
                     elseif is_suit_parse(v, "Spades") and suits["Spades"] == 0 then suits["Spades"] = suits["Spades"] + 1
-                    elseif is_suit_parse(v, "Clubs") and suits["Clubs"] == 0 then suits["Clubs"] = suits["Clubs"] + 1 end
+                    elseif is_suit_parse(v, "Hearts") and suits["Hearts"] == 0 then suits["Hearts"] = suits["Hearts"] + 1 end
                 end
             end
             if (suits["Hearts"] > 0 or suits["Diamonds"] > 0 or suits["Spades"] > 0) and suits["Clubs"] > 0 then
@@ -2638,6 +2714,7 @@ function evaluate_parse(parse)
     scoring_cards_parse(parse)
     local not_allow = eval_blind_parse(parse.blind, parse, {debuff_hand = true})
     if not not_allow then
+        local dollar_cap = parse.global.money
         for _, v in ipairs(parse.jokers) do
             eval_joker_parse(v, parse, {before = true})
         end
@@ -2681,7 +2758,6 @@ function evaluate_parse(parse)
                 end
             end
         end
-        local dollar_cap = parse.global.money
         for _, v in ipairs(parse.jokers) do
             if v.edition == "foil" or v.edition == "holo" then
                 eval_edition_parse(v, parse)
