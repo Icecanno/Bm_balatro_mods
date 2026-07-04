@@ -1,5 +1,5 @@
 [manifest]
-version = "1.0.1s"
+version = "1.0.1w"
 dump_lua = true
 priority = 0
 
@@ -61,12 +61,19 @@ overwrite = false
 [patches.pattern]
 target = "card.lua"
 pattern = '''G.E_MANAGER:add_event(Event({func = (function() G.GAME.dollar_buffer = 0; return true end)}))'''
-position = "at"
+position = "before"
 payload = '''
-if Portable.config.reduce_animation then
-    G.GAME.dollar_buffer = 0
-else
-    G.E_MANAGER:add_event(Event({func = (function() G.GAME.dollar_buffer = 0; return true end)}))
+if not Portable.config.reduce_animation then
+'''
+match_indent = true
+overwrite = false
+
+[[patches]]
+[patches.pattern]
+target = "card.lua"
+pattern = '''G.E_MANAGER:add_event(Event({func = (function() G.GAME.dollar_buffer = 0; return true end)}))'''
+position = "after"
+payload = '''
 end
 '''
 match_indent = true
