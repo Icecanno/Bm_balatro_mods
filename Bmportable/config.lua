@@ -10,4 +10,5 @@ return {
     score_display = false,
     reduce_animation = false,
     zoom_out = false,
+    assistive_gesture = false,
 }
