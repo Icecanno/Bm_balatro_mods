@@ -2927,6 +2927,9 @@ end
 ----------------------------------------------
 -- 1. Scroll up to play highlighted cards, scroll down to discard them
 -- 2. Hold right mouse and drag over the hand to select multiple cards (releasing without a slide unhighlights all, keeping vanilla right-click behavior)
+-- If BetterMouseAndGamepad is installed, these gestures are left entirely to that mod.
+
+if not (SMODS.Mods and SMODS.Mods['BetterMouseAndGamepad']) then
 
 local love_wheelmoved_ref = love.wheelmoved
 function love.wheelmoved(x, y)
@@ -2955,15 +2958,14 @@ function love.mousereleased(x, y, button)
 end
 
 -- Right-click press: queue when assistive gesture is on and input is a mouse (consumed by Controller:update);
--- otherwise keep vanilla behavior (immediately unhighlight all, including the gamepad B button path)
+-- otherwise pass through to the underlying implementation (vanilla, or whatever other mod hooked it)
 local Controller_queue_R_cursor_press_ref = Controller.queue_R_cursor_press
 function Controller:queue_R_cursor_press(x, y)
     if self.locks.frame then return end
     if Portable.config.assistive_gesture and not self.HID.controller then
         self.R_cursor_queue = {x = x, y = y}
-    elseif not G.SETTINGS.paused and G.hand and G.hand.highlighted[1] then
-        if (G.play and #G.play.cards > 0) or (self.locked) or (self.locks.frame) or (G.GAME.STOP_USE and G.GAME.STOP_USE > 0) then return end
-        G.hand:unhighlight_all()
+    else
+        Controller_queue_R_cursor_press_ref(self, x, y)
     end
 end
 
@@ -3026,6 +3028,11 @@ function Controller:update(dt)
         end
         self.R_cursor_up.handled = true
     end
+end
+
+else
+    -- BetterMouseAndGamepad already implements scroll and right-click gestures, leave them to it
+    sendDebugMessage("Bmportable: assistive gesture is handled by BetterMouseAndGamepad, skipping")
 end
 
 ----------------------------------------------
