@@ -1,14 +1,21 @@
 --- STEAMODDED HEADER
 --- MOD_NAME: Bmportable
 --- MOD_ID: Bmportable
---- MOD_AUTHOR: [BaiMao Brookling]
+--- MOD_AUTHOR: [BaiMao, Brookling]
 --- MOD_DESCRIPTION: More convenient function and information
 --- BADGE_COLOUR: 366999
---- VERSION: 1.0.1w
+--- VERSION: 1.0.1x
 ----------------------------------------------
 ------------MOD CODE -------------------------
 
 Portable = SMODS.current_mod
+
+SMODS.Atlas{
+    key = "modicon",
+    px = 34,
+    py = 34,
+    path = "icon.png"
+}
 
 Portable.update = {
     dollar_UI = false,
@@ -86,18 +93,29 @@ function Portable_create_config_row(toggle_args, tooltip_key)
 end
 
 Portable.config_tab = function()
-    return {n=G.UIT.ROOT, config = {align = "cm", padding = 0.05, colour = G.C.CLEAR}, nodes={
+    local left_rows = {
         Portable_create_config_row({label = localize("k_misprint_display"), ref_table = Portable.config, ref_value = "misprint_display"}, "bmportable_misprint_display"),
         Portable_create_config_row({label = localize("k_deck_order"), ref_table = Portable.config, ref_value = "deck_order"}, "bmportable_deck_order"),
         Portable_create_config_row({label = localize("k_flip_sort"), ref_table = Portable.config, ref_value = "flip_sort"}, "bmportable_flip_sort"),
+        Portable_create_config_row({label = localize("k_score_parse"), ref_table = Portable.config, ref_value = "score_parse"}, "bmportable_score_parse"),
+        Portable_create_config_row({label = localize("k_score_display"), ref_table = Portable.config, ref_value = "score_display"}, "bmportable_score_display"),
+        Portable_create_config_row({label = localize("k_zoom_out"), ref_table = Portable.config, ref_value = "zoom_out"}, "bmportable_zoom_out"),
+    }
+    local right_rows = {
         Portable_create_config_row({label = localize("k_predict_random"), ref_table = Portable.config, ref_value = "predict_random"}, "bmportable_predict_random"),
         Portable_create_config_row({label = localize("k_predict_random_bonus"), ref_table = Portable.config, ref_value = "predict_random_bonus"}, "bmportable_predict_random_bonus"),
         Portable_create_config_row({label = localize("k_flash_load"), ref_table = Portable.config, ref_value = "flash_load"}, "bmportable_flash_load"),
         Portable_create_config_row({label = localize("b_manual_save"), ref_table = Portable.config, ref_value = "manual_save"}, "bmportable_manual_save"),
-        Portable_create_config_row({label = localize("k_score_parse"), ref_table = Portable.config, ref_value = "score_parse"}, "bmportable_score_parse"),
-        Portable_create_config_row({label = localize("k_score_display"), ref_table = Portable.config, ref_value = "score_display"}, "bmportable_score_display"),
         Portable_create_config_row({label = localize("k_reduce_animation"), ref_table = Portable.config, ref_value = "reduce_animation"}, "bmportable_reduce_animation"),
-        Portable_create_config_row({label = localize("k_zoom_out"), ref_table = Portable.config, ref_value = "zoom_out"}, "bmportable_zoom_out"),
+        Portable_create_config_row({label = localize("k_assistive_gesture"), ref_table = Portable.config, ref_value = "assistive_gesture"}, "bmportable_assistive_gesture"),
+    }
+    return {n=G.UIT.ROOT, config = {align = "cm", padding = 0.05, colour = G.C.CLEAR}, nodes={
+        {n=G.UIT.R, config={align = "cm", padding = 0.05, r = 0.1, colour = G.C.BLACK}, nodes={
+            {n=G.UIT.C, config={align = "cm", padding = 0.05}, nodes=left_rows},
+            {n=G.UIT.C, config={align = "cm", padding = 0.05}, nodes=right_rows},
+            -- right spacer: shifts the whole block left by half its width (node-level config.offset is ignored by the engine)
+            {n=G.UIT.C, config={align = "cm", minw = 1.2}, nodes={}},
+        }},
     }}
 end
 
@@ -2902,6 +2920,112 @@ function G.UIDEF.view_deck_order()
     }}
   }}
   return t
+end
+
+----------------------------------------------
+------------Assistive Gesture-----------------
+----------------------------------------------
+-- 1. Scroll up to play highlighted cards, scroll down to discard them
+-- 2. Hold right mouse and drag over the hand to select multiple cards (releasing without a slide unhighlights all, keeping vanilla right-click behavior)
+
+local love_wheelmoved_ref = love.wheelmoved
+function love.wheelmoved(x, y)
+    if love_wheelmoved_ref then love_wheelmoved_ref(x, y) end
+    if Portable.config.assistive_gesture then
+        if y > 0 then
+            local play_button = G.buttons and G.buttons.states.visible and G.buttons:get_UIE_by_ID('play_button')
+            if play_button and play_button.config.button and G.hand and G.hand.highlighted[1] then
+                G.FUNCS.play_cards_from_highlighted()
+            end
+        elseif y < 0 then
+            local discard_button = G.buttons and G.buttons.states.visible and G.buttons:get_UIE_by_ID('discard_button')
+            if discard_button and discard_button.config.button and G.hand and G.hand.highlighted[1] then
+                G.FUNCS.discard_cards_from_highlighted()
+            end
+        end
+    end
+end
+
+local love_mousereleased_ref = love.mousereleased
+function love.mousereleased(x, y, button)
+    if love_mousereleased_ref then love_mousereleased_ref(x, y, button) end
+    if button == 2 and G.CONTROLLER and Portable.config.assistive_gesture then
+        G.CONTROLLER:R_cursor_release(x, y)
+    end
+end
+
+-- Right-click press: queue when assistive gesture is on and input is a mouse (consumed by Controller:update);
+-- otherwise keep vanilla behavior (immediately unhighlight all, including the gamepad B button path)
+local Controller_queue_R_cursor_press_ref = Controller.queue_R_cursor_press
+function Controller:queue_R_cursor_press(x, y)
+    if self.locks.frame then return end
+    if Portable.config.assistive_gesture and not self.HID.controller then
+        self.R_cursor_queue = {x = x, y = y}
+    elseif not G.SETTINGS.paused and G.hand and G.hand.highlighted[1] then
+        if (G.play and #G.play.cards > 0) or (self.locked) or (self.locks.frame) or (G.GAME.STOP_USE and G.GAME.STOP_USE > 0) then return end
+        G.hand:unhighlight_all()
+    end
+end
+
+function Controller:R_cursor_press(x, y)
+    x = x or self.cursor_position.x
+    y = y or self.cursor_position.y
+    if ((self.locked) and (not G.SETTINGS.paused or G.screenwipe)) or (self.locks.frame) then return end
+    self.R_cursor_down = self.R_cursor_down or {handled = true, T = {x=0, y=0}}
+    self.R_cursor_down.T = {x = x/(G.TILESCALE*G.TILESIZE), y = y/(G.TILESCALE*G.TILESIZE)}
+    self.R_cursor_down.handled = false
+end
+
+function Controller:R_cursor_release(x, y)
+    self.R_cursor_up = self.R_cursor_up or {handled = true}
+    self.R_cursor_up.handled = false
+end
+
+local Controller_update_ref = Controller.update
+function Controller:update(dt)
+    Controller_update_ref(self, dt)
+    if not Portable.config.assistive_gesture then self.slide = nil; return end
+    -- Right-drag card selection state machine (ported from Balatro Free, runs after per-frame collision/hover updates)
+    self.slide = self.slide or {handled = true, can = false, target = nil}
+    self.R_cursor_down = self.R_cursor_down or {handled = true, T = {x=0, y=0}}
+    self.R_cursor_up = self.R_cursor_up or {handled = true}
+    if self.R_cursor_queue then
+        self:R_cursor_press(self.R_cursor_queue.x, self.R_cursor_queue.y)
+        self.R_cursor_queue = nil
+    end
+    if not self.R_cursor_down.handled then
+        if Portable.config.assistive_gesture then self.slide.handled = false end
+        self.R_cursor_down.handled = true
+    end
+    if not self.slide.handled then
+        if Vector_Dist(self.R_cursor_down.T, self.cursor_hover.T) >= 0.1*G.MIN_CLICK_DIST then
+            self.slide.can = true
+            self.slide.handled = true
+        end
+    end
+    if self.slide.can then
+        if self.hovering.target and self.hovering.target:is(Card) and self.hovering.target.area and G.hand and self.hovering.target.area == G.hand then
+            if not self.slide.target then
+                self.hovering.target:click()
+                self.slide.target = self.hovering.target
+            elseif self.hovering.target ~= self.slide.target then
+                self.hovering.target:click()
+                self.slide.target = self.hovering.target
+            end
+        end
+    end
+    if not self.R_cursor_up.handled then
+        self.slide.handled = true
+        self.slide.target = nil
+        if self.slide.can then
+            self.slide.can = false
+        elseif not G.SETTINGS.paused and G.hand and G.hand.highlighted[1] then
+            if not ((G.play and #G.play.cards > 0) or (self.locked) or (self.locks.frame) or (G.GAME.STOP_USE and G.GAME.STOP_USE > 0)) then
+                G.hand:unhighlight_all()
+            end
+        end
+        self.R_cursor_up.handled = true
+    end
 end
 
 ----------------------------------------------
