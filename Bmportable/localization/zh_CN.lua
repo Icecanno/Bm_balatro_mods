@@ -80,6 +80,15 @@ return {
                     '给桌面更多可视空间',
                 },
             },
+            bmportable_assistive_gesture = {
+                name = '辅助手势',
+                text = {
+                    '滚轮向上打出选择的牌，',
+                    '向下弃掉选择的牌，',
+                    '按住右键拖过手牌可',
+                    '连续选中多张牌',
+                },
+            },
             Preview={
                 name = '结果',
                 text = {
@@ -104,6 +113,7 @@ return {
             k_score_display = "分数显示",
             k_reduce_animation = "削减动画",
             k_zoom_out = "相机拉远",
+            k_assistive_gesture = "辅助手势",
             ph_select_achievement = "选择一项成就",
             k_manual_save={
                 "手动存档",
