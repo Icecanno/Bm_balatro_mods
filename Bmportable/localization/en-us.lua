@@ -80,6 +80,15 @@ return {
                     'to show more of the table',
                 },
             },
+            bmportable_assistive_gesture = {
+                name = 'Assistive Gesture',
+                text = {
+                    'Scroll up to play the selected cards,',
+                    'scroll down to discard the selected cards.',
+                    'Hold right mouse and drag over the',
+                    'hand to select multiple cards',
+                },
+            },
             Preview={
                 name = 'Result',
                 text = {
@@ -104,6 +113,7 @@ return {
             k_score_display = "Score Display",
             k_reduce_animation = "Reduce Animation",
             k_zoom_out = "Zoom Out",
+            k_assistive_gesture = "Assistive Gesture",
             ph_select_achievement = "Select an Achievement",
             k_manual_save={
                 "Manual Save",
